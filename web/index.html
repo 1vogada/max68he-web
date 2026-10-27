@@ -7,6 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="key-wizard.css">
 </head>
 <body>
   <aside class="sidebar">
@@ -64,7 +65,7 @@
         <div class="seg-tabs view-tabs" data-views="advanced macros texts" role="group" aria-label="Advanced keys">
           <button type="button" data-goto="advanced">Advanced keys</button><button type="button" data-goto="macros">Macros</button><button type="button" data-goto="texts">Text keys</button></div>
         <div class="seg-tabs view-tabs" id="gp-tabs" data-views="analog" role="group" aria-label="Gamepad">
-          <button type="button" data-gp-tab="setup" class="on">Setup &amp; remap</button><button type="button" data-gp-tab="config">Configuration</button><button type="button" data-gp-tab="tester">Gamepad tester</button></div>
+          <button type="button" data-gp-tab="setup" class="on">Setup &amp; remap</button><button type="button" data-gp-tab="config">Configuration</button><button type="button" data-gp-tab="tester">Gamepad tester</button><button type="button" data-gp-tab="wizard">Key wizard</button></div>
         <div class="layer-list" id="layer-list" data-views="keymap fn layers" role="group" aria-label="Layers"></div>
         <div class="picks" data-views="actuation rt" role="group" aria-label="Quick select">
           <span class="muted small">Select</span>
@@ -207,6 +208,26 @@
           <button type="button" id="analog-wasd">WASD → left stick</button>
           <button type="button" id="analog-clear">Clear all</button>
         </div>
+      </section>
+
+      <section class="panel wide kw" id="kw-panel" data-views="analog" data-gp="wizard">
+        <h2>Key wizard <span class="chip" id="kw-key">no key yet</span></h2>
+        <div id="kw-gate"></div>
+        <ol class="kw-steps" id="kw-steps" aria-label="Wizard steps"></ol>
+        <div class="kw-body">
+          <div class="kw-main" id="kw-main" aria-live="polite"></div>
+          <div class="kw-side" data-nodirty>
+            <div class="switch-viz-box" id="kw-gauge" title="Drag up and down on the gauge to set the depth of this question"></div>
+            <p class="muted small kw-live" id="kw-live"></p>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel wide" id="kw-list" data-views="analog" data-gp="wizard">
+        <h2>Keys with action maps <span class="chip" id="kw-count">0</span></h2>
+        <div id="kw-list-gate"></div>
+        <p class="muted small" id="kw-empty">No key has an action map yet.</p>
+        <ul class="kw-maps" id="kw-maps"></ul>
       </section>
 
       <section class="panel" id="analog-pad" data-views="analog" data-gp="tester">
@@ -531,6 +552,10 @@
   <script src="scan-rate.js"></script>
   <script src="gp-curve.js"></script>
   <script src="gp-tester.js"></script>
+  <script src="key-actions-core.js"></script>
+  <script src="ka-picker.js"></script>
+  <script src="key-wizard-steps.js"></script>
+  <script src="key-wizard.js"></script>
   <script src="analog.js"></script>
   <script src="stats.js"></script>
   <script src="droplet-core.js"></script>

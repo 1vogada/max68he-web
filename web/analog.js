@@ -18,6 +18,7 @@
     ['Menu, sticks', ['back', 'start', 'ls', 'rs']],
     ['Mouse', ['mouse-up', 'mouse-left', 'mouse-down', 'mouse-right', 'mouse1', 'mouse2', 'mouse3', 'wheel-up', 'wheel-down']],
   ];
+  App.gpChips = { LABEL, GROUPS };                // the palette's names, for the Key wizard's picker
   const PRESET_NAMES = { linear: 'Linear', aggro: 'Aggro', slow: 'Slow', smooth: 'Smooth' };
   let cfg = null;
   let gamepadSrc = null;
@@ -30,7 +31,10 @@
   const slotOf = (el) => { for (const [s, e] of App.keyEls) if (e === el) return s; return undefined; };
   const tab = () => document.body.dataset.gp;
 
+  const wizard = () => tab() === 'wizard' && App.keyWizard;
+
   function paint(slot, el) {
+    if (wizard()) return App.keyWizard.paint(slot, el, depth.get(slot) ?? 0);
     const b = bindingOf(slot);
     App.$('.val', el).textContent = b ? LABEL[b.target] : '';
     el.classList.toggle('sel', App.st.selected.has(slot));
@@ -43,6 +47,7 @@
 
   // with a palette button armed, a click gives that key the target (or takes it off again)
   function keyDown(slot) {
+    if (wizard()) return App.keyWizard.keyDown(slot);
     if (armed && cfg) {
       const b = bindingOf(slot);
       assign(slot, b?.target === armed ? null : armed);
@@ -262,6 +267,7 @@
       if (mm > 0) depth.set(slot, mm); else depth.delete(slot);
       const el = App.keyEls.get(slot);
       if (el && App.st.view === 'analog') App.$('.fill', el).style.height = `${Math.min(mm / 3.6, 1) * 100}%`;
+      if (wizard()) App.keyWizard.onDepth(slot, mm);
     };
   }
 
@@ -273,11 +279,14 @@
   }
 
   function showTab(t) {
+    if (tab() === 'wizard' && t !== 'wizard' && App.keyWizard && !App.keyWizard.canLeave()) return;
     document.body.dataset.gp = t;
     App.$$('#gp-tabs [data-gp-tab]').forEach((b) => b.classList.toggle('on', b.dataset.gpTab === t));
     if (t !== 'setup' && armed) { armed = null; drawPalette(); }
     if (t === 'tester' && App.st.view === 'analog') App.gpTester.start(); else App.gpTester.stop();
     if (t === 'config') redraw();
+    App.keyWizard?.shown(t === 'wizard' && App.st.view === 'analog');
+    if (App.st.view === 'analog') App.paintKeys();
   }
 
   function init() {
@@ -336,7 +345,7 @@
     }).catch((e) => App.ui.showError(bind, `Could not read the gamepad mapping: ${e.message}`));
     // Streams (and the tester) run only while this page is open.
     window.addEventListener('pagechange', (e) => {
-      if (e.detail === 'analog') { startStreams(); showTab(tab()); } else { stopStreams(); App.gpTester.stop(); armed = null; }
+      if (e.detail === 'analog') { startStreams(); showTab(tab()); } else { stopStreams(); App.gpTester.stop(); armed = null; App.keyWizard?.shown(false); }
     });
     window.addEventListener('themechange', () => cfg && redraw());
   }

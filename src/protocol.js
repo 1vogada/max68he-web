@@ -565,7 +565,7 @@ function hostPacket(op, header = [], data = []) {
 
 // second word (CAPS [8..9]): optional parts of the build
 const HOST_CAPS2 = ['games', 'dksLevels', 'fnLayers', 'textKeys', 'calibration', 'perfMode', 'sectionTime', 'textTyping',
-  'gamepadPlus', 'compatMode', 'releaseDebounce', 'idleDim', 'resetFe', 'sequence', 'sequenceGlide'];
+  'gamepadPlus', 'compatMode', 'releaseDebounce', 'idleDim', 'resetFe', 'sequence', 'sequenceGlide', 'keyActions'];
 
 function parseCaps(r) {
   const bits = r[6] | (r[7] << 8), bits2 = (r[8] ?? 0) | ((r[9] ?? 0) << 8);
@@ -715,6 +715,43 @@ function parseSeqStatus(r) {
     step: r[10] | (r[11] << 8), steps: r[12] | (r[13] << 8), capacity: r[14] | (r[15] << 8), ended: SEQ_ENDS[r[16]] ?? null };
 }
 
+// ---- key action maps (open firmware 0xEE, caps 'keyActions') ------------------
+// Per key: what happens at which depth / after how long held (src/key-actions.js has the JSON form).
+// [EE, 0 INFO] -> [8] table entries, [9] max rules, [10] in use, [11] record bytes;
+// [EE, 1 GET, slot] -> [2] 0 / 1 no map, [3] slot, [8..63] record;
+// [EE, 2 SET, slot] + record -> [2] 0 ok / 2 table full / 3 bad rule ([3] rule index, 0xFF header) / 4 bad slot;
+// [EE, 3 LIST, start] -> [3] slots returned, [4] total in use, [8..] slots with maps (ascending).
+// Record (56): [0] slot [1] n [2] gap cmm [3] flags [4..5] press cmm LE [6..7] 0, then 6 rules of
+// 8 bytes: [trigger, mode, tval lo, tval hi, output, a, b, c].
+const KA = { OP: 0xee, INFO: 0, GET: 1, SET: 2, LIST: 3, RECORD: 56, MAX_RULES: 6, RULE: 8 };
+const KA_ERRORS = [null, 'the key has no map', 'the key action table is full', 'bad rule', 'bad slot'];
+const kaSlot = (slot) => { checkSlot(slot); return slot; };
+const kaInfoPacket = () => hostPacket(KA.OP, [KA.INFO]);
+const kaGetPacket = (slot) => hostPacket(KA.OP, [KA.GET, kaSlot(slot)]);
+const kaListPacket = (start) => hostPacket(KA.OP, [KA.LIST, kaSlot(start)]);
+function kaSetPacket(slot, record) {
+  if (record.length !== KA.RECORD) throw new Error(`a key action record is ${KA.RECORD} bytes`);
+  return hostPacket(KA.OP, [KA.SET, kaSlot(slot)], record);
+}
+// { slot, gap, flags, press, rules: [{ trigger, mode, tval, output, a, b, c }] } (wire units) <-> 56 bytes
+function encodeKaRecord({ slot, gap = 0, flags = 0, press = 0, rules = [] }) {
+  if (rules.length > KA.MAX_RULES) throw new Error(`at most ${KA.MAX_RULES} rules per key`);
+  const r = new Array(KA.RECORD).fill(0);
+  r.splice(0, 6, slot, rules.length, gap, flags, press & 0xff, (press >> 8) & 0xff);
+  rules.forEach((x, i) => r.splice(8 + i * KA.RULE, KA.RULE, x.trigger, x.mode, x.tval & 0xff, (x.tval >> 8) & 0xff,
+    x.output, x.a & 0xff, (x.b ?? 0) & 0xff, (x.c ?? 0) & 0xff));
+  return r;
+}
+function decodeKaRecord(b) {
+  const n = Math.min(b[1], KA.MAX_RULES);
+  return { slot: b[0], gap: b[2], flags: b[3], press: b[4] | (b[5] << 8),
+    rules: Array.from({ length: n }, (_, i) => {
+      const o = 8 + i * KA.RULE;
+      return { trigger: b[o], mode: b[o + 1], tval: b[o + 2] | (b[o + 3] << 8), output: b[o + 4], a: b[o + 5], b: b[o + 6], c: b[o + 7] };
+    }) };
+}
+const parseKaInfo = (r) => ({ entries: r[8], maxRules: r[9], used: r[10], recordBytes: r[11] });
+
 // Travel stream input report: [5, 0x1B, lo, hi, slot], report ID optional.
 function parseTravel(data) {
   const d = data[0] === 5 ? data.slice(1) : data;
@@ -734,6 +771,7 @@ module.exports = {
   GAMEPAD_TARGETS, GAMEPAD_CURVES, gamepadGetPacket, gamepadSetPacket, parseGamepad, gamepadBindPackets, gamepadGetBindPacket,
   clearOverlayPacket, parseKeyEvent,
   SEQ, SEQ_EVENTS, seqPacket, seqPlayPacket, seqAppendPackets, parseSeqStatus,
+  KA, KA_ERRORS, kaInfoPacket, kaGetPacket, kaSetPacket, kaListPacket, encodeKaRecord, decodeKaRecord, parseKaInfo,
   KIND, NO_PARTNER, dksActionByte, dksCells, dksActionsPacket,
   DKS_ACTIONS, DKS_MAX_LEVELS, DKS_MIN_MM, DKS_MAX_MM, dksReadPacket, dksWritePacket, parseDks, parseOptions, optionsPacket,
 };

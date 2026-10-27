@@ -1,0 +1,61 @@
+/* Key wizard (Gamepad page, 4th tab): web/key-wizard.js. Uses the theme tokens of style.css. */
+body:not([data-gp="wizard"]) [data-gp="wizard"] { display: none !important; }
+#kw-panel > .savebar { display: none; }        /* Save lives on the summary step */
+
+.kw-steps { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 0; padding: 0; }
+.kw-steps button { display: flex; gap: 8px; align-items: center; background: none; border: 1px solid var(--line); border-radius: 99px; padding: 5px 12px 5px 5px; color: var(--muted); }
+.kw-steps button b { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--surface-2); color: var(--text); font-size: 12px; }
+.kw-steps button.on { border-color: var(--accent); color: var(--text); background: var(--accent-soft); }
+.kw-steps button.on b, .kw-steps button.done b { background: var(--accent); color: var(--accent-ink); }
+.kw-steps button:disabled { opacity: .45; cursor: default; }
+
+.kw-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 400px); gap: 20px; align-items: start; }
+@media (max-width: 980px) { .kw-body { grid-template-columns: minmax(0, 1fr); } .kw-side { order: -1; } }
+.kw-main { display: grid; gap: 12px; align-content: start; min-width: 0; }
+.kw-main p { margin: 0; }
+.kw-lead { font-size: 15px; }
+.kw-side .switch-viz-box { margin: 0; }
+.kw-live { min-height: 3em; text-align: center; margin: 0; }
+#kw-gauge.kw-drag svg { cursor: ns-resize; touch-action: none; }
+
+.kw-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.kw-card { display: grid; gap: 4px; justify-items: start; text-align: left; padding: 12px; border-radius: 10px; min-height: 110px; align-content: start; }
+.kw-card b { font-size: 14px; color: var(--text); }
+.kw-card .kw-ico { color: var(--accent); font-weight: 700; font-size: 15px; letter-spacing: .04em; }
+.kw-card.on, .kw-card.current { border-color: var(--accent); background: var(--accent-soft); }
+
+.kw-q { display: grid; gap: 12px; }
+.kw-q-text { margin: 0; font-size: 19px; font-weight: 600; line-height: 1.3; }
+.kw-dots { display: flex; gap: 6px; }
+.kw-dots button { width: 28px; height: 28px; padding: 0; border-radius: 50%; font-size: 12px; color: var(--muted); }
+.kw-dots button.set { color: var(--text); box-shadow: inset 0 -3px 0 var(--accent); }
+.kw-dots button.on { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
+.kw-slider { max-width: 460px; }
+.kw-nav { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.kw-nav .link, .kw-main button.link { background: none; border: 0; color: var(--muted); text-decoration: underline; padding: 4px; }
+.kw-nav .link:hover:not(:disabled) { color: var(--text); }
+.kw-alts { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.kw-how label { max-width: 460px; }
+
+.kap { display: grid; gap: 10px; }
+.kap-pane { display: grid; gap: 10px; }
+.kap-pane .gp-palette { margin: 0; }
+.kap-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.kap-chips .gp-chip, .kap-pane .gp-chip { cursor: pointer; }
+.kap-axis, .kap-move { display: grid; gap: 8px; max-width: 460px; }
+.kap-move .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; color: var(--muted); }
+.kap-grow { display: flex; gap: 6px; align-items: center; font-size: 13px; color: var(--muted); }
+.kap-move button { justify-self: start; }
+
+.kw-summary { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 15px; }
+.kw-summary.extra { font-size: 13px; color: var(--muted); }
+.kw-errors { color: var(--danger); background: var(--danger-soft); border-radius: 8px; padding: 8px 10px; }
+.kw-more { border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
+.kw-more[open] { display: grid; gap: 12px; }
+.kw-more summary { cursor: pointer; color: var(--muted); }
+
+.kw-maps { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.kw-maps li { display: grid; grid-template-columns: 70px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 8px 12px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
+.kw-maps li.on { border-color: var(--accent); }
+@media (max-width: 640px) { .kw-maps li { grid-template-columns: 1fr; } }

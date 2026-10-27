@@ -19,7 +19,8 @@ globalThis.fetch = async (input, init = {}) => {
   const p = apiPath(typeof input === 'string' ? input : input.url);
   if (!p) return realFetch(input, init);
   await ready;
-  let body = {};
+  // like the server: a GET's query string (?key=W) is its body
+  let body = Object.fromEntries(new URL(typeof input === 'string' ? input : input.url, location.href).searchParams);
   if (init.body) { try { body = JSON.parse(init.body); } catch { return json(400, { error: 'invalid JSON' }); } }
   try {
     return json(200, await callRoute(`${(init.method ?? 'GET').toUpperCase()} ${p}`, body));

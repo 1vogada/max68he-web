@@ -11,7 +11,7 @@ Status: ✅ have it (as good or better) · 🟡 partly · ❌ missing. Work: **f
 Open firmware (anyone can change it), AI/MCP control, macros, text keys (Unicode), up to 8 DKS levels
 (they have 4), 4 Fn layers + 3 extra layers, analog mouse from key depth, per-key travel calibration,
 key stats, live analog view, on-board games, depth-reactive lighting effects, per-key paint with 5
-pictures, scan-speed figures, one-click flashing with recovery, timed key / mouse sequences played by the keyboard itself (no PC jitter), with mouse glides along curves (fw `c89c92b`, not flashed yet).
+pictures, scan-speed figures, one-click flashing with recovery, timed key / mouse sequences played by the keyboard itself (no PC jitter), with mouse glides along curves; per-key action maps with a Key wizard (depth / hold / tap -> keys, gamepad, mouse) (fw `4f1637a`, not flashed yet).
 
 ## Gamepad (first: on par or better)
 

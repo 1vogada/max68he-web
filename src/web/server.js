@@ -442,6 +442,7 @@ const myProfiles = profileRoutes({ keyboard, conn, drop, isDeviceError, isFlashi
 Object.assign(ROUTES, myProfiles.routes);
 Object.assign(ROUTES, require('./remap-routes').remapRoutes({ keyboard, state, httpError, intIn, keyValue, slotName }));   // POST /api/remap/batch
 Object.assign(ROUTES, require('./sequence-routes').sequenceRoutes({ keyboard, httpError }));   // /api/sequence/play|stop|status|preview
+Object.assign(ROUTES, require('./key-action-routes').keyActionRoutes({ keyboard, httpError }));   // /api/key-actions (GET ?key=, POST, DELETE, preview)
 ROUTES['GET /api/plugins'] = async () => PLUGINS.map((p) => ({ name: p.name ?? p.id, scripts: p.scripts, styles: p.styles }));
 
 function readBody(req) {
@@ -510,7 +511,9 @@ data: ${JSON.stringify(e.message)}
   const handler = ROUTES[route];
   if (!handler) return req.method === 'GET' ? serveStatic(req, res) : sendJson(res, 404, { error: 'not found' });
   try {
-    sendJson(res, 200, await callRoute(route, await readBody(req)));
+    // a GET's query string (?key=W) arrives as its body; callRoute reopens a stale handle (connection.js)
+    const body = req.method === 'GET' ? Object.fromEntries(new URL(req.url, 'http://x').searchParams) : await readBody(req);
+    sendJson(res, 200, await callRoute(route, body));
   } catch (e) {
     sendJson(res, e.status || 500, { error: e.message });
   }

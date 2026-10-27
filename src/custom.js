@@ -4,6 +4,7 @@
 const P = require('./protocol');
 const { openInputNodes } = require('./hid');
 const { parseSequence, sequenceMs, hasGlide } = require('./sequence');
+const { parseSpec, toRecord, fromRecord } = require('./key-actions');
 
 module.exports = {
   _requireCustom() {
@@ -282,6 +283,84 @@ module.exports = {
   async sequenceStatus() {
     await this._requireSequence();
     return this._seqQuery(P.seqPacket(P.SEQ.STATUS));
+  },
+
+  // ---- key action maps (0xEE): per key, what happens at which depth / after how long held ----
+  // JSON form and validation in key-actions.js. The keyboard saves the table on its own.
+  async _requireKeyActions() {
+    this._requireCustom();
+    if (!(await this.getCaps()).features.includes('keyActions')) {
+      throw Object.assign(new Error('Key action maps need a newer open firmware'), { status: 400 });
+    }
+  },
+
+  // 'W', '12', 12 or { key | slot } -> { slot, name }
+  async _kaKey(ref) {
+    const r = typeof ref === 'object' && ref !== null ? ref : /^\d+$/.test(String(ref)) ? { slot: Number(ref) } : { key: ref };
+    let slot = r.slot;
+    if (slot === undefined) {
+      try { [slot] = await this.resolveSlots([r.key]); } catch (e) { throw Object.assign(e, { status: 400 }); }
+    }
+    if (!Number.isInteger(slot) || slot < 0 || slot >= P.SLOTS) throw Object.assign(new Error(`slot is 0..${P.SLOTS - 1}`), { status: 400 });
+    const name = (await this.listKeys()).find((k) => k.slot === slot)?.name ?? null;
+    return { slot, name };
+  },
+
+  async _kaQuery(pkt) {
+    const r = await this.t.query(pkt);
+    if (r[0] !== P.KA.OP) throw new Error('the keyboard did not answer the key action command');
+    if (r[2] > 1) {
+      const why = r[2] === 3 ? (r[3] === 0xff ? 'bad key options' : `bad rule ${r[3] + 1}`) : P.KA_ERRORS[r[2]] ?? `error ${r[2]}`;
+      throw Object.assign(new Error(`keyboard refused the key map: ${why}`), { status: 400 });
+    }
+    return r;
+  },
+
+  // { entries (keys that can have a map), maxRules, used, recordBytes }
+  async keyActionsInfo() {
+    await this._requireKeyActions();
+    return P.parseKaInfo(await this._kaQuery(P.kaInfoPacket()));
+  },
+
+  // key: that key's map, or null when it has none; no key: every key that has one
+  async getKeyActions(key) {
+    await this._requireKeyActions();
+    if (key !== undefined) {
+      const { slot, name } = await this._kaKey(key);
+      const r = await this._kaQuery(P.kaGetPacket(slot));
+      return r[2] === 1 ? null : fromRecord(r.slice(8, 64), name);
+    }
+    const slots = [];
+    for (let start = 0; start < P.SLOTS;) {
+      const r = await this._kaQuery(P.kaListPacket(start));
+      const got = r.slice(8, 8 + Math.min(r[3], 56));
+      slots.push(...got);
+      if (!got.length || slots.length >= r[4]) break;
+      start = got[got.length - 1] + 1;
+    }
+    const names = new Map((await this.listKeys()).map((k) => [k.slot, k.name]));
+    const out = [];
+    for (const slot of slots) {
+      const r = await this._kaQuery(P.kaGetPacket(slot));
+      if (r[2] === 0) out.push(fromRecord(r.slice(8, 64), names.get(slot)));
+    }
+    return out;
+  },
+
+  // spec: see key-actions.js; checked before anything is sent. Returns the map as stored.
+  async setKeyActions(spec) {
+    const wire = parseSpec(spec);
+    await this._requireKeyActions();
+    const { slot, name } = await this._kaKey(spec.slot !== undefined ? { slot: spec.slot } : { key: spec.key });
+    const r = await this._kaQuery(P.kaSetPacket(slot, toRecord(wire, slot)));
+    return fromRecord(r.slice(8, 64), name);
+  },
+
+  async removeKeyActions(key) {
+    await this._requireKeyActions();
+    const { slot, name } = await this._kaKey(key);
+    await this._kaQuery(P.kaSetPacket(slot, P.encodeKaRecord({ slot })));
+    return { key: name, slot, removed: true };
   },
 
   // Per-key colours over the running effect for ttlMs; [0,0,0] = leave alone.

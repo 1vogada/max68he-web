@@ -76,3 +76,12 @@ test('switching keyboards: unknown ones refused, the next open is the new one, n
   await request('POST', '/api/ping');
   assert.strictEqual(opened.at(-1), 'max68he');
 });
+
+test('a GET query string reaches the route (key action maps), preview needs no keyboard', async () => {
+  const slot = await request('GET', '/api/key-actions?slot=900');
+  assert.deepStrictEqual([slot.status, JSON.parse(slot.body).error], [400, 'slot is 0..127']);
+  const both = await request('GET', '/api/key-actions?key=W&slot=1');
+  assert.deepStrictEqual([both.status, JSON.parse(both.body).error], [400, 'give key (like "W") or slot']);
+  const pre = await request('POST', '/api/key-actions/preview', JSON.stringify({ key: 'W', rules: [{ when: 'hold', ms: 3000, do: { gamepad: 'LB' } }] }));
+  assert.deepStrictEqual(JSON.parse(pre.body).summary, ['Held 3 s: presses LB.']);
+});

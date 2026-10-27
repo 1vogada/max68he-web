@@ -1,0 +1,549 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MAX68HE</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true"></span>
+      <div>
+        <strong id="model-name">MAX68HE</strong>
+        <span id="board" class="muted">connecting…</span>
+        <select id="kb-pick" aria-label="Keyboard" hidden></select>
+      </div>
+    </div>
+    <nav aria-label="Pages">
+      <!-- Grouped like Wootility. A page with tabs lists its other views in data-also; those
+           views keep a hidden nav button (data-sub) so goto() and the open-firmware checks still work. -->
+      <p class="nav-group">Profiles</p>
+      <button data-view="quick"><span class="ico">⚡</span>Quick settings</button>
+      <button data-view="profiles"><span class="ico">▣</span>My profiles</button>
+      <p class="nav-group">Keyboard configuration</p>
+      <button data-view="actuation" class="on"><span class="ico">⇣</span>Actuation point</button>
+      <button data-view="rt"><span class="ico">⇅</span>Rapid trigger</button>
+      <button data-view="lighting" data-also="paint"><span class="ico">✦</span>RGB settings</button>
+      <button data-view="paint" data-sub hidden>Per-key colour</button>
+      <button data-view="keymap" data-also="fn layers"><span class="ico">⌨</span>Remap</button>
+      <button data-view="fn" data-sub hidden>Fn layer</button>
+      <button data-view="layers" data-sub data-open-fw hidden>Layers</button>
+      <button data-view="advanced" data-also="macros texts"><span class="ico">⧉</span>Advanced keys</button>
+      <button data-view="macros" data-sub hidden>Macros</button>
+      <button data-view="texts" data-sub hidden>Text keys</button>
+      <button data-view="analog"><span class="ico">✚</span>Gamepad</button>
+      <p class="nav-group">Tools</p>
+      <button data-view="travel"><span class="ico">◎</span>Analog view</button>
+      <button data-view="stats" data-open-fw data-api="2"><span class="ico">▤</span>Key stats</button>
+      <p class="nav-group">Settings</p>
+      <button data-view="settings"><span class="ico">⚙</span>General settings</button>
+      <button data-view="updates"><span class="ico">⟳</span>Updates</button>
+      <button data-view="interface"><span class="ico">◐</span>Interface</button>
+    </nav>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div class="profiles" id="profiles" role="tablist" aria-label="Profile"></div>
+      <div class="history" role="group" aria-label="Undo and redo">
+        <button type="button" id="undo" aria-label="Undo" disabled>↶</button><button type="button" id="redo" aria-label="Redo" disabled>↷</button></div>
+      <div class="status" id="status"><span class="dot" aria-hidden="true"></span><span id="status-text">Connecting…</span>
+        <span id="scan-rate" class="scan-rate" hidden title="How often the keyboard actually reads its key sensors (scans/s), and how often it processes them into key presses (passes/s). Measured live on the keyboard."></span>
+        <button type="button" id="reconnect" hidden>Reconnect</button></div>
+    </header>
+
+    <section class="stage">
+      <div class="stage-head">
+        <h1 id="page-title">Actuation point</h1>
+        <div class="seg-tabs view-tabs" data-views="lighting paint" role="group" aria-label="RGB settings">
+          <button type="button" data-goto="lighting">Effects</button><button type="button" data-goto="paint">Per-key colour</button></div>
+        <div class="seg-tabs view-tabs" data-views="advanced macros texts" role="group" aria-label="Advanced keys">
+          <button type="button" data-goto="advanced">Advanced keys</button><button type="button" data-goto="macros">Macros</button><button type="button" data-goto="texts">Text keys</button></div>
+        <div class="seg-tabs view-tabs" id="gp-tabs" data-views="analog" role="group" aria-label="Gamepad">
+          <button type="button" data-gp-tab="setup" class="on">Setup &amp; remap</button><button type="button" data-gp-tab="config">Configuration</button><button type="button" data-gp-tab="tester">Gamepad tester</button></div>
+        <div class="layer-list" id="layer-list" data-views="keymap fn layers" role="group" aria-label="Layers"></div>
+        <div class="picks" data-views="actuation rt" role="group" aria-label="Quick select">
+          <span class="muted small">Select</span>
+          <button data-pick="all">All</button>
+          <button data-pick="typing">Typing</button>
+          <button data-pick="wasd">WASD</button>
+          <button data-pick="mods">Mods</button>
+          <button data-pick="none">Clear</button>
+        </div>
+      </div>
+      <div class="board-wrap">
+        <div id="keyboard" class="keyboard" aria-label="Keyboard"></div>
+      </div>
+      <p class="hint" id="hint"></p>
+    </section>
+
+    <section class="panels">
+      <form class="panel wide" id="switch-form" data-views="actuation rt">
+        <h2><span><span data-views="actuation">Actuation</span><span data-views="rt">Rapid trigger</span></span> <span class="chip" id="sel-count">0 keys selected</span></h2>
+        <p class="muted small" id="switch-note"></p>
+        <div class="grid2">
+          <label class="toggle" data-views="rt"><input type="checkbox" name="rapidTrigger"><span class="switch"></span> Rapid trigger</label>
+          <div data-views="rt" id="cont-rt" class="field">
+            <label class="toggle"><input type="checkbox" name="continuousRt"><span class="switch"></span> Continuous rapid trigger</label>
+            <p class="muted small">Stays armed until the key is fully up, so it keeps firing anywhere in the press.</p>
+          </div>
+          <label data-views="actuation">Actuation point <output data-for="actuation"></output>
+            <input type="range" name="actuation" min="0.1" max="3.4" step="0.05">
+            <span class="help">How far down the key types. Smaller = faster, but easier to set off by accident.</span></label>
+          <label data-views="actuation">Release point <output data-for="release"></output>
+            <input type="range" name="release" min="0.1" max="3.4" step="0.05">
+            <span class="help">How far the key must come back up before it lets go. Keep it above the actuation point.</span></label>
+          <label data-views="actuation">Bottom dead zone <output data-for="deadZone"></output>
+            <input type="range" name="deadZone" min="0" max="1" step="0.05">
+            <span class="help">Ignores the last bit of travel, so pressing hard at the bottom is not seen as a new move.</span></label>
+          <label data-views="rt">Press sensitivity <output data-for="rtPress"></output>
+            <input type="range" name="rtPress" min="0.01" max="1" step="0.01">
+            <span class="help">How far the key must move down again to fire again.</span></label>
+          <label data-views="rt">Release sensitivity <output data-for="rtRelease"></output>
+            <input type="range" name="rtRelease" min="0.01" max="1" step="0.01">
+            <span class="help">How far the key must move up to let go.</span></label>
+        </div>
+      </form>
+
+      <section class="panel" id="stats-panel" data-views="stats">
+        <h2>Key presses <span class="chip">since power-up</span></h2>
+        <div class="stat-row"><div><span class="muted small">Total</span><b id="stats-total">–</b></div>
+          <div><span class="muted small">Keys / min</span><b id="stats-kpm">–</b></div></div>
+        <h3 class="small muted">Most pressed</h3>
+        <ol class="top-keys" id="stats-top"></ol>
+        <div class="row-buttons"><button type="button" id="stats-reset">Reset counters</button></div>
+        <p class="muted small">Counted on the keyboard in RAM, so it never wears the flash; unplugging resets it.</p>
+      </section>
+
+      <form class="panel" id="remap-form" data-views="keymap fn layers" autocomplete="off">
+        <p class="muted small" id="fn-tabs-note" data-views="fn"></p>
+        <h2><span id="remap-title">Click a key on the board</span></h2>
+        <p class="muted" id="remap-now"></p>
+        <label>New function
+          <input name="value" list="key-choices" placeholder="type a name or pick one: A, Ctrl+C, VolumeUp, Macro2…" spellcheck="false"></label>
+        <datalist id="key-choices"></datalist>
+        <label id="remap-text" hidden><span><span id="remap-text-name">Text</span> types</span> <span class="text-count small" id="remap-text-count"></span>
+          <input name="text" spellcheck="false" placeholder="the text this key types"></label>
+        <p class="muted small" id="remap-text-note" hidden></p>
+        <div class="row-buttons" data-nodirty>
+          <button type="button" id="remap-reset">Use its own key</button>
+          <button type="button" id="remap-clear" hidden>Clear Fn</button>
+          <button type="button" id="remap-newtext" hidden title="Puts a free text slot on this key; write the text right here">New text</button>
+        </div>
+        <p class="muted small" id="layer-help" hidden>Layer keys: put <b>MO1</b>..<b>MO3</b> on the Remap (base) page to hold a layer,
+          <b>TG1</b>..<b>TG3</b> anywhere to switch one on and off. Empty keys here use the layer below.</p>
+      </form>
+
+      <section class="panel" id="remap-presets" data-views="keymap fn">
+        <h2>Presets</h2>
+        <p class="muted small">One click changes the whole main layer of the active profile (Function: Fn layer 1). It asks first, and ↶ undoes it in one step.</p>
+        <div class="preset-row" id="preset-buttons"></div>
+      </section>
+
+      <section class="panel wide" id="remap-palette" data-views="keymap fn layers">
+        <h2>Keys <input type="search" id="palette-search" class="palette-search" placeholder="Search keys…" aria-label="Search keys"></h2>
+        <p class="muted small">Drag a key onto the board to put it there on the layer shown above, or click it to put it in the box, then Save.</p>
+        <div class="palette" id="palette-keys"></div>
+      </section>
+
+      <form class="panel wide" id="adv-form" data-views="advanced" autocomplete="off">
+        <h2><span id="adv-title">Click a key on the board</span></h2>
+        <p class="muted" id="adv-now"></p>
+        <input type="hidden" name="type" value="none">
+        <div class="seg-tabs" role="group" aria-label="Advanced key type" id="adv-types">
+          <button type="button" data-type="none">None</button>
+          <button type="button" data-type="snap">Snap tap</button>
+          <button type="button" data-type="modtap">Mod-tap</button>
+          <button type="button" data-type="toggle">Toggle</button>
+          <button type="button" data-type="dks">Dynamic keystroke</button>
+        </div>
+        <div data-adv="snap" hidden>
+          <label>Partner key <select name="partner"></select></label>
+          <p class="muted small">Pressing one key lets go of the other, so the two never cancel each other out (strafing left/right). Which one wins when both are down is set in Settings. You can also click the partner on the board.</p>
+        </div>
+        <div data-adv="modtap" class="grid2" hidden>
+          <label>Hold <input name="hold" list="key-choices" spellcheck="false"></label>
+          <label>Tap <input name="tap" list="key-choices" spellcheck="false"></label>
+          <label>Hold after (ms) <input name="holdMs" type="number" min="10" max="2550" step="10"></label>
+          <p class="muted small">A quick tap sends the tap key; holding longer than the time sends the hold key (for example tap = Esc, hold = Ctrl).</p>
+        </div>
+        <div data-adv="toggle" class="grid2" hidden>
+          <label>Key <input name="toggleKey" list="key-choices" spellcheck="false"></label>
+          <label class="row"><input type="checkbox" name="repeat"> Repeat while latched</label>
+          <p class="muted small">One press holds the key down, the next press lets it go (for example auto-run).</p>
+        </div>
+        <div data-adv="dks" hidden>
+          <div class="dks2" id="dks2" hidden></div>
+          <div class="dks-legacy">
+          <p class="gate">This firmware has the two-point DKS. The open firmware with DKS levels lets you set up to 8 depths.</p>
+          <div class="grid2">
+            <label>First point (mm) <input name="first" type="number" min="0.1" max="3.3" step="0.05"></label>
+            <label>Second point (mm) <input name="second" type="number" min="0.2" max="3.4" step="0.05"></label>
+          </div>
+          <div class="dks-grid" id="dks-grid">
+            <div class="dks-row dks-head"><span>Key</span><span>↓ first</span><span>↓ second</span><span>↑ second</span><span>↑ first</span></div>
+          </div>
+          <p class="muted small">Tap = press and release at that point. Press = held until the next point. Hold = held until the key is fully released.</p>
+          </div>
+        </div>
+      </form>
+
+      <section class="panel wide" id="adv-active" data-views="advanced">
+        <h2>Active advanced keys <span class="chip aa-count">0</span></h2>
+        <p class="muted small aa-empty">No key has an advanced function yet.</p>
+        <ul class="aa-list"></ul>
+      </section>
+
+      <section class="panel wide" id="gp-palette" data-views="analog" data-gp="setup">
+        <h2>Controller mapping <span class="chip" id="gp-count">0 keys</span></h2>
+        <p class="muted small">Pick a button, then click keys on the board to give it to them (or drag it onto a key).
+          Click a key that already has it, or right-click any key, to take it off. Saved at once.</p>
+        <div class="gp-palette" id="gp-chips"></div>
+        <div class="row-buttons">
+          <button type="button" id="analog-wasd">WASD → left stick</button>
+          <button type="button" id="analog-clear">Clear all</button>
+        </div>
+      </section>
+
+      <section class="panel" id="analog-pad" data-views="analog" data-gp="tester">
+        <h2>Preview <span class="chip">from key depth</span></h2>
+        <svg viewBox="-120 -70 240 140" class="pad" role="img" aria-label="Virtual gamepad">
+          <rect x="-110" y="-62" width="70" height="8" rx="4" class="track"/><rect id="pad-lt" x="-110" y="-62" width="0" height="8" rx="4" class="lvl"/>
+          <rect x="40" y="-62" width="70" height="8" rx="4" class="track"/><rect id="pad-rt" x="40" y="-62" width="0" height="8" rx="4" class="lvl"/>
+          <text x="-75" y="-40" class="cap">LT</text><text x="75" y="-40" class="cap">RT</text>
+          <rect x="-58" y="-38" width="22" height="9" rx="4" class="btn" data-btn="lb"/><rect x="36" y="-38" width="22" height="9" rx="4" class="btn" data-btn="rb"/>
+          <g transform="translate(-70,-4)"><circle r="30" class="track"/><circle id="pad-ls" r="11" class="stick" data-btn="ls"/></g>
+          <g transform="translate(25,30)"><circle r="30" class="track"/><circle id="pad-rs" r="11" class="stick" data-btn="rs"/></g>
+          <g transform="translate(-25,34)">
+            <rect x="-6" y="-22" width="12" height="14" rx="2" class="btn" data-btn="up"/><rect x="-6" y="8" width="12" height="14" rx="2" class="btn" data-btn="down"/>
+            <rect x="-22" y="-6" width="14" height="12" rx="2" class="btn" data-btn="left"/><rect x="8" y="-6" width="14" height="12" rx="2" class="btn" data-btn="right"/>
+          </g>
+          <g transform="translate(78,-6)">
+            <circle cy="-16" r="8" class="btn" data-btn="y"/><circle cy="16" r="8" class="btn" data-btn="a"/>
+            <circle cx="-16" r="8" class="btn" data-btn="x"/><circle cx="16" r="8" class="btn" data-btn="b"/>
+          </g>
+          <rect x="-16" y="-20" width="12" height="7" rx="3" class="btn" data-btn="back"/><rect x="4" y="-20" width="12" height="7" rx="3" class="btn" data-btn="start"/>
+        </svg>
+        <p class="muted small" id="pad-readout"></p>
+        <p class="muted small">Worked out on the PC from your real presses, with the settings on Configuration.</p>
+      </section>
+
+      <section class="panel" id="gp-tester" data-views="analog" data-gp="tester">
+        <h2>What the PC sees <span class="chip" id="gpt-name">no controller</span></h2>
+        <div id="gpt-body"></div>
+        <p class="muted small" id="gpt-note">Browsers show a controller only after one of its buttons was pressed: press a gamepad key once.</p>
+      </section>
+
+      <form class="panel" id="analog-board" data-views="analog" data-gp="setup" autocomplete="off">
+        <h2>On the keyboard</h2>
+        <label class="toggle"><input type="checkbox" name="enabled"><span class="switch"></span> Run this mapping on the keyboard</label>
+        <label class="toggle"><input type="checkbox" name="keysStopTyping"><span class="switch"></span> Bound keys stop typing</label>
+        <label hidden>Mouse speed at full press <output data-for="mouseSpeed"></output>
+          <input type="range" name="mouseSpeed" min="100" max="4000" step="100"></label>
+        <p class="muted small" id="analog-board-note">The keyboard shows up as a game controller (DirectInput, works with Steam Input) and needs nothing running on the PC. Mouse targets (M ←, Click L, Wheel…) move the real pointer from the keyboard. Inverted bindings stay PC-only.</p>
+      </form>
+
+      <form class="panel" id="analog-bind" data-views="analog" data-gp="setup">
+        <h2><span id="analog-key">Click a key on the board</span></h2>
+        <label>Acts as <select name="target"></select></label>
+        <label class="row"><input type="checkbox" name="invert"> Invert (full when released, PC preview only)</label>
+      </form>
+
+      <form class="panel wide" id="analog-settings" data-views="analog" data-gp="config">
+        <div class="gp-config">
+          <div>
+            <h2>Analog curve</h2>
+            <div class="seg-tabs" id="curve-presets" role="group" aria-label="Curve presets"></div>
+            <canvas id="curve-canvas" width="420" height="220" aria-label="Response curve: key depth to output. Drag the points to change it."></canvas>
+            <p class="muted small">Left to right: key depth, 0 to 4 mm (the shaded part is the dead zone). Bottom to top: how far the stick
+              or trigger moves. Drag a point to shape your own curve.</p>
+            <label>Curve <select name="curve"></select></label>
+            <label>Dead zone <output data-for="deadzoneMm"></output>
+              <input type="range" name="deadzoneMm" min="0" max="1.5" step="0.05"></label>
+            <label>Full press at <output data-for="fullMm"></output>
+              <input type="range" name="fullMm" min="0.5" max="3.8" step="0.05"></label>
+            <label>Buttons press at <output data-for="buttonMm"></output>
+              <input type="range" name="buttonMm" min="0.2" max="3.5" step="0.05"></label>
+          </div>
+          <div>
+            <h2>Gamepad response</h2>
+            <label>Anti-deadzone <output data-for="antiDeadzone"></output>
+              <input type="range" name="antiDeadzone" min="0" max="50" step="1">
+              <span class="help">A pressed key starts the stick here, so the game's own dead zone doesn't swallow small presses.</span></label>
+            <div class="field">
+              <label class="toggle"><input type="checkbox" name="square"><span class="switch"></span> Square joystick output</label>
+              <p class="muted small">A full diagonal gives full sideways and full forward at once, instead of staying on the circle a real stick
+                draws. Good for games that move slower on diagonals.</p>
+            </div>
+            <div class="field">
+              <label class="toggle"><input type="checkbox" name="snappy"><span class="switch"></span> Snappy joystick</label>
+              <p class="muted small">Two opposite keys (A and D): the one pressed deeper wins outright, instead of the two cancelling out.</p>
+            </div>
+            <div class="field">
+              <label class="toggle"><input type="checkbox" name="angleOn"><span class="switch"></span> Angle adjustment</label>
+              <label>Diagonal angle <output data-for="diagonalDeg"></output>
+                <input type="range" name="diagonalDeg" min="10" max="80" step="1">
+                <span class="help">Where two equally pressed keys (W and D) point, from sideways (10°) to forward (80°). 45° is a plain diagonal.</span></label>
+            </div>
+            <p class="muted small" id="gp-plus-note" hidden></p>
+          </div>
+        </div>
+      </form>
+
+      <form class="panel" id="macro-form" data-views="macros" autocomplete="off">
+        <h2>Macros</h2>
+        <label>Slot <select name="index"></select></label>
+        <p class="muted small" id="macro-content"></p>
+        <label>Type this text <input name="text" maxlength="60" placeholder="hello world" spellcheck="false"></label>
+        <div class="row-buttons">
+          <label class="row">Repeat <input name="repeat" type="number" min="1" max="100" value="1"> times</label>
+          <label class="row">Delay between keys <input name="delay" type="number" min="1" max="1000" value="15"> ms</label>
+        </div>
+        <div class="row-buttons" data-nodirty><button type="button" id="macro-assign">Put this macro on a key…</button></div>
+        <p class="muted small">The keyboard types it by itself, no app needed. On a key it plays once per press;
+          <code>Macro3:hold</code> repeats while held, <code>Macro3:toggle</code> starts and stops it.</p>
+      </form>
+
+      <section class="panel" id="seq-panel" data-views="macros">
+        <h2>Play a sequence</h2>
+        <label>Sequence
+          <textarea id="seq-text" rows="5" spellcheck="false" placeholder="W down; 120ms; Space tap; 30ms; release"></textarea>
+        </label>
+        <details class="seq-help small">
+          <summary>How to write it</summary>
+          <p>One step per line or separated by <code>;</code>, <code>#</code> starts a note.</p>
+          <ul>
+            <li><code>120ms</code>, <code>1.5s</code>: wait before the next step</li>
+            <li><code>W down</code>, <code>W up</code>: hold or let go of a key; <code>Ctrl+Shift+Esc down</code> for a chord</li>
+            <li><code>Space tap</code>, <code>Ctrl+C tap</code>, <code>A tap 50ms</code>: press and let go (held 20 ms unless given)</li>
+            <li><code>release</code>: let go of everything</li>
+            <li><code>click L</code> (L, R, M), <code>mouse down R</code>, <code>mouse up R</code>, <code>move 10 -5</code> (right 10, up 5 at once), <code>wheel 2</code></li>
+          </ul>
+          <p>Glide the pointer instead of jumping: <code>move DX DY over TIME [curve]</code>, 1 ms to 65.5 s.</p>
+          <ul>
+            <li><code>move 300 0 over 500ms</code>: steady speed (linear)</li>
+            <li><code>move 0 -200 over 1s ease out</code>: <code>ease in</code> starts slow, <code>ease out</code> ends slow, <code>ease inout</code> both;
+              a strength after it, <code>ease in 3</code> (0.3 to 8, default 2)</li>
+            <li><code>move 150 150 over 400ms sine</code>, <code>… smooth</code>: gentle start and end</li>
+            <li><code>move 400 0 over 1s expo 8</code>: exponential, -20 to 20 (not 0, default 5); minus eases out</li>
+            <li><code>move 200 0 over 800ms curve points 0,0 64,200 192,230 255,255</code>: your own curve, 4 points time,distance 0 to 255</li>
+          </ul>
+          <p>A glide runs on its own: the next step follows straight away (its wait counts from the glide's start), up to 4 glides at once.
+            The sequence ends when the last glide is done.</p>
+          <p>Up to 512 steps. Everything is let go at the end, so end with a wait to keep a key held.</p>
+        </details>
+        <figure class="seq-preview" id="seq-preview" hidden>
+          <svg id="seq-plot" viewBox="0 0 320 120" role="img" aria-label="Pointer position over time"></svg>
+          <figcaption class="small muted"><span class="seq-key seq-key-x">x</span> right <span class="seq-key seq-key-y">y</span> down,
+            pixels from where the pointer starts <span id="seq-plot-info"></span></figcaption>
+        </figure>
+        <p class="small" id="seq-preview-msg" aria-live="polite"></p>
+        <label class="row"><input type="checkbox" id="seq-stop-key" checked> Stop when I press a key</label>
+        <div class="row-buttons">
+          <button type="button" class="primary" id="seq-play">Play</button>
+          <button type="button" id="seq-stop" disabled>Stop</button>
+        </div>
+        <p class="muted small" id="seq-status" aria-live="polite"></p>
+        <p class="muted small">The keyboard plays it on its own clock, so timing is exact. In online games with anti-cheat,
+          automated input can break their rules.</p>
+      </section>
+
+      <section class="panel wide" id="text-panel" data-views="texts">
+        <h2>Texts <label class="row small"><input type="checkbox" id="text-show-all"> Show all 64 slots</label></h2>
+        <div id="text-typing"></div>
+        <p class="muted small" id="text-status"></p>
+        <div class="text-list" id="text-list"></div>
+        <p class="muted small">Up to 119 bytes each: plain letters, digits and punctuation take 1, special characters
+          (é, °, ʖ, emoji…) take 2 to 4. Plain characters are typed as on a US keyboard layout.</p>
+        <details class="text-unicode">
+          <summary>Special characters ( ͡° ͜ʖ ͡°): one-time setup</summary>
+          <p class="small">The keyboard can only press keys, so for a special character it types the system's Unicode code
+            for it. Which system is set in General settings → Firmware options.</p>
+          <p class="small"><b>Windows</b> (once, then sign out and back in): run this in PowerShell, then it works in most programs.</p>
+          <pre class="small"><code>Set-ItemProperty -Path 'HKCU:\Control Panel\Input Method' -Name EnableHexNumpad -Value '1'</code></pre>
+          <p class="small"><b>Linux</b>: works in GTK / IBus programs as it is. <b>macOS</b>: add the "Unicode Hex Input" keyboard
+            in System Settings → Keyboard → Input Sources and switch to it.</p>
+          <p class="small muted">Each special character takes about a tenth of a second to type.</p>
+        </details>
+      </section>
+
+      <form class="panel" id="light-form" data-views="lighting">
+        <h2>Lighting effect</h2>
+        <div class="effect-presets" id="light-presets">
+          <span class="muted small">Presets</span>
+          <div class="preset-row"></div>
+        </div>
+        <div class="grid2">
+          <label>Effect <select name="mode"></select></label>
+          <label id="option-row">Direction <select name="option"></select></label>
+          <label>Brightness <output data-for="brightness"></output>
+            <input type="range" name="brightness" min="0" max="4" step="1"></label>
+          <label>Speed <output data-for="speed"></output>
+            <input type="range" name="speed" min="0" max="4" step="1"></label>
+        </div>
+        <p id="effect-info" class="muted effect-info"></p>
+        <div class="colours">
+          <label class="row"><input type="radio" name="colourKind" value="custom"> Colour
+            <input type="color" name="color"></label>
+          <label class="row"><input type="radio" name="colourKind" value="rainbow"> Rainbow</label>
+          <label class="row"><input type="radio" name="colourKind" value="preset"> Preset
+            <select name="presetColour"></select></label>
+        </div>
+      </form>
+
+      <form class="panel" id="paint-form" data-views="paint">
+        <h2>Per-key colour</h2>
+        <div class="row-buttons">
+          <label class="row">Picture <select name="picture">
+            <option value="0">1</option><option value="1">2</option><option value="2">3</option>
+            <option value="3">4</option><option value="4">5</option></select></label>
+          <label class="row"><input type="radio" name="tool" value="paint" checked> Paint
+            <input type="color" name="brush" value="#ff8a3d"></label>
+          <label class="row"><input type="radio" name="tool" value="erase"> Erase</label>
+          <button type="button" id="paint-fill">Fill all</button>
+          <button type="button" id="paint-clear">Clear all</button>
+          <button type="button" id="paint-undo" disabled>Undo</button>
+        </div>
+        <p class="muted small" id="paint-active"></p>
+        <p class="muted small">The keyboard can't send pictures back, so this browser remembers what you painted.</p>
+      </form>
+
+      <form class="panel" id="settings-panel" data-views="settings">
+        <h2>Device</h2>
+        <label>Polling rate <select id="polling" name="polling" aria-label="Polling rate"></select>
+          <span class="help">How often the keyboard reports to the PC. Higher is snappier; lower uses less CPU.</span></label>
+        <dl class="facts" id="facts"></dl>
+      </form>
+
+      <section class="panel" id="look-panel" data-views="interface">
+        <h2>Appearance</h2>
+        <div class="seg-tabs" role="group" aria-label="Colour theme" id="theme-tabs">
+          <button type="button" data-theme-pick="system">Like the system</button>
+          <button type="button" data-theme-pick="light">Light</button>
+          <button type="button" data-theme-pick="dark">Dark</button>
+        </div>
+        <p class="muted small">Only changes this page, in this browser.</p>
+        <label class="toggle"><input type="checkbox" id="marquee-everywhere"><span class="switch"></span> Selection box on every keyboard</label>
+        <p class="muted small">Drag from empty space around the board to pick keys on every page, not only Actuation and Rapid trigger. Pages that edit one key open the top-left key the box touches. Applies in every browser on this PC.</p>
+        <label class="toggle"><input type="checkbox" id="extra-layers"><span class="switch"></span> Extra layers (Layer 1-3)</label>
+        <p class="muted small">Three more keymaps that change keys without Fn, switched by MO1-3 (hold) or TG1-3 (toggle) keys. Adds Layer 1-3 to Remap's layer row and puts those keys in the key picker. Open firmware only.</p>
+      </section>
+
+      <form class="panel" id="options-form" data-views="settings">
+        <h2>Keyboard options</h2>
+        <label class="toggle"><input type="checkbox" name="wasdSwap"><span class="switch"></span> Swap WASD and arrow keys</label>
+        <label class="toggle"><input type="checkbox" name="antiMistouch"><span class="switch"></span> Accidental-touch protection</label>
+        <label>Rapid-trigger stability <select name="rtStability"></select>
+          <span class="help">Filters tiny wobbles so rapid trigger doesn't fire by itself. Higher = steadier, but a little slower.</span></label>
+      </form>
+
+      <form class="panel" id="fw-form" data-views="settings" autocomplete="off">
+        <h2>Firmware options</h2>
+        <label class="toggle"><input type="checkbox" name="capsIndicator"><span class="switch"></span> Caps Lock lights the Caps key</label>
+        <label>Caps Lock colour <input type="color" name="capsColor"></label>
+        <label class="toggle"><input type="checkbox" name="layerIndicator"><span class="switch"></span> Show the active layer's keys</label>
+        <label class="toggle"><input type="checkbox" name="statusGuide"><span class="switch"></span> Fn status flashes</label>
+        <div class="field">
+          <label class="toggle"><input type="checkbox" name="fnHold"><span class="switch"></span> Fn layer pick only while held</label>
+          <p class="muted small">Fn + Home / Del / PgUp / PgDn picks Fn layer 1 / 2 / 3 / 4. Off: the pick stays until you pick another. On: it only applies while you hold that key.</p>
+        </div>
+        <label class="unicode-field">Special characters in text keys are typed for
+          <select name="unicode"><option value="windows">Windows</option><option value="linux">Linux</option><option value="mac">macOS</option></select>
+          <span class="help">How the keyboard enters characters a US keyboard doesn't have (é, °, ( ͡° ͜ʖ ͡°), emoji…). Windows needs a one-time setting, see the Text keys page.</span></label>
+        <div id="fw-text-typing"></div>
+        <div class="field">
+          <label class="toggle"><input type="checkbox" name="perf"><span class="switch"></span> Performance mode (lighting off)</label>
+          <p class="muted small">The keyboard stops drawing lighting effects and the LEDs stay off, so all its time goes to the keys. Game mode and calibration still light up.</p>
+        </div>
+        <label>Snap Tap when both keys are down
+          <select name="snapMode"><option value="last">Last pressed wins</option><option value="neutral">Neither (neutral)</option><option value="first">First pressed wins</option><option value="deeper">Deeper pressed wins (Rappy Snappy)</option></select></label>
+        <div class="field fw-dim" data-cap="idleDim">
+          <label>Dim lighting after idle <output data-for="dimMinutes"></output>
+            <input type="range" name="dimMinutes" min="0" max="60" step="1"></label>
+          <label>Dimmed brightness <output data-for="dimPercent"></output>
+            <input type="range" name="dimPercent" min="5" max="90" step="5"></label>
+          <p class="muted small">The lighting fades to this level first, then turns off at "Lighting off after idle". A dim time at or after the off time is skipped. Any key wakes it.</p>
+        </div>
+        <label>Lighting off after idle <output data-for="idleMinutes"></output>
+          <input type="range" name="idleMinutes" min="0" max="60" step="1">
+          <span class="help">0 = never.</span></label>
+        <div class="field" data-cap="releaseDebounce">
+          <label>Release debounce <output data-for="releaseDebounceMs"></output>
+            <input type="range" name="releaseDebounceMs" min="0" max="10" step="1"></label>
+          <p class="muted small">After you let go, a key stays down this long, so a key that flickers on release isn't sent twice. Presses are never delayed. Off for the fastest rapid trigger.</p>
+        </div>
+        <div class="field" data-cap="compatMode">
+          <label class="toggle"><input type="checkbox" name="compatMode"><span class="switch"></span> Compatibility mode (6-key)</label>
+          <p class="muted small">The keyboard reports itself as a plain 6-key boot keyboard, without n-key rollover, for a BIOS, a console or a KVM switch that doesn't see keys otherwise. Only 6 keys at once (plus modifiers) reach the PC.</p>
+        </div>
+        <p class="muted small" data-fw-missing hidden></p>
+      </form>
+
+      <section class="panel" id="fw-reset-panel" data-views="settings">
+        <h2>Reset all keyboard settings</h2>
+        <p class="muted small">Puts the keyboard back to its factory settings, stored on the keyboard itself. Key calibration is kept.
+          Export each profile first if you may want it back.</p>
+        <div class="row-buttons"><button type="button" id="fw-reset-btn" class="danger">Reset all keyboard settings…</button></div>
+        <p class="muted small" id="fw-reset-note" hidden></p>
+      </section>
+
+      <section class="panel wide" id="quick-panel" data-views="quick"></section>
+      <section class="panel wide" id="profiles-panel" data-views="profiles"></section>
+      <section class="panel wide" id="library-panel" data-views="profiles"></section>
+      <section class="panel wide" id="apps-panel" data-views="profiles"></section>
+
+      <section class="panel" id="backup" data-views="profiles">
+        <h2>Profile backup</h2>
+        <p class="muted small">Saves everything in the active profile to a file: keys, Fn layer, advanced keys, switch settings, lighting and options. Import puts a file back into the active profile.</p>
+        <div class="row-buttons">
+          <button type="button" id="export-btn" class="primary">Export profile</button>
+          <label class="file-btn"><input type="file" id="import-file" accept="application/json,.json" hidden>Import…</label>
+        </div>
+      </section>
+    </section>
+  </div>
+
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="ui.js"></script>
+  <script src="history.js"></script>
+  <script src="layout.js"></script>
+  <script src="keymap.js"></script>
+  <script src="remap-presets.js"></script>
+  <script src="remap-palette.js"></script>
+  <script src="layers.js"></script>
+  <script src="paint.js"></script>
+  <script src="macros.js"></script>
+  <script src="glide-core.js"></script>
+  <script src="sequence.js"></script>
+  <script src="text-typing-option.js"></script>
+  <script src="texts.js"></script>
+  <script src="dks-editor.js"></script>
+  <script src="adv-active.js"></script>
+  <script src="advanced.js"></script>
+  <script src="settings.js"></script>
+  <script src="maintenance.js"></script>
+  <script src="switch-viz.js"></script>
+  <script src="switch-viz-panels.js"></script>
+  <script src="scan-rate.js"></script>
+  <script src="gp-curve.js"></script>
+  <script src="gp-tester.js"></script>
+  <script src="analog.js"></script>
+  <script src="stats.js"></script>
+  <script src="droplet-core.js"></script>
+  <script src="fx-core.js"></script>
+  <script src="pfx-core.js"></script>
+  <script src="effect-preview.js"></script>
+  <script src="effect-info.js"></script>
+  <script src="effect-presets.js"></script>
+  <script src="recent-colours.js"></script>
+  <script src="prefs.js"></script>
+  <script src="marquee.js"></script>
+  <script src="overview.js"></script>
+  <script src="my-profiles.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

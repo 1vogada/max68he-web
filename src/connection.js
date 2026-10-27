@@ -1,0 +1,70 @@
+// One long-lived keyboard connection for a server process (web UI, MCP), so the
+// transport's pacing and queue hold across requests. Concurrent first requests
+// share one open; separate opens would close each other.
+const { Keyboard } = require('./keyboard');
+const { sentCount } = require('./hid');
+
+// Device trouble (hid.js marks it) as opposed to bad input or a bug: only this
+// is worth closing the keyboard for.
+const isDeviceError = (e) => e?.device === true;
+
+// blocked() returns an error while nothing may open the keyboard (a flash runs).
+// key() names the model to open (models.js); undefined lets Keyboard.open pick.
+function createConnection({ blocked = () => null, key = () => undefined } = {}) {
+  let kb = null;
+  let opening = null;
+  let closing = null;
+
+  function get() {
+    const why = blocked();
+    if (why) return Promise.reject(why);
+    if (kb) return Promise.resolve(kb);
+    if (!opening) {
+      opening = (async () => {
+        if (closing) await closing;   // the old handle goes first
+        kb = await Keyboard.open({ key: key() });
+        return kb;
+      })().finally(() => { opening = null; });
+    }
+    return opening;
+  }
+
+  // Closes the keyboard once the work already queued on it has run, so requests
+  // in flight finish on the handle they started with. The next get() reopens.
+  function drop() {
+    const k = kb;
+    kb = null;
+    if (!k) return closing ?? Promise.resolve();
+    closing = (async () => {
+      for (let b; b !== k.t.busy;) { b = k.t.busy; await b; }   // work queued meanwhile too
+      try { k.close(); } catch { /* already gone */ }
+    })().finally(() => { closing = null; });
+    return closing;
+  }
+
+  // After a failed request: drop only on device errors.
+  const fail = (e) => (isDeviceError(e) ? drop() : Promise.resolve());
+
+  // Runs one request. A handle gone stale (the keyboard was replugged or flashed) fails
+  // on its first send; when no packet at all reached the keyboard meanwhile, the request
+  // runs once more on a reopened handle instead of failing. onFail(e) runs after each failure.
+  async function run(fn, onFail = fail) {
+    const before = sentCount();
+    try {
+      return await fn();
+    } catch (e) {
+      await onFail(e);
+      if (!(e?.unsent && sentCount() === before)) throw e;
+    }
+    try {
+      return await fn();
+    } catch (e) {
+      await onFail(e);
+      throw e;
+    }
+  }
+
+  return { get, drop, fail, run, get current() { return kb; }, get opening() { return opening; } };
+}
+
+module.exports = { createConnection, isDeviceError };

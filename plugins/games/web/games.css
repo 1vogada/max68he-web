@@ -1,0 +1,12 @@
+/* Games page (plugin) */
+.games-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.games-head h2 { margin: 0; }
+.games-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-top: 12px; }
+.game-card { border: 1px solid var(--line, #333); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+.game-card.playing { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.game-card h3 { margin: 0; font-size: 15px; }
+.game-card p { margin: 0; line-height: 1.4; }
+.game-card button { align-self: flex-start; margin-top: auto; }
+.game-top { display: flex; align-items: center; gap: 8px; }
+.game-key { min-width: 26px; padding: 2px 6px; border-radius: 6px; text-align: center; font-size: 12px; font-weight: 600;
+  background: color-mix(in srgb, #2ecc40 30%, var(--cap)); }

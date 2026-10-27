@@ -1,0 +1,5 @@
+/* web version only (site/): the Connect keyboard bar */
+.web-connect { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  margin: 0 0 14px; padding: 12px 14px; border: 1px solid var(--accent); border-radius: 10px;
+  background: var(--accent-soft); font-size: 14px; }
+.web-connect[hidden] { display: none; }

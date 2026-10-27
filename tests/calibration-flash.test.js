@@ -34,6 +34,7 @@ test('flasher: lists only plausible images, refuses unknown ids', async () => {
   process.env.MAX68HE_FIRMWARE_DIR = fakeFirmwareDir();
   delete require.cache[require.resolve('../src/flasher')];
   const F = require('../src/flasher');
+  F.defaults.open = null;   // stubbed ry-flash: never open a real keyboard for the key-map backup
   const imgs = F.listImages();
   assert.deepStrictEqual(imgs.map((x) => x.id), ['latest', 'stock', 'previous:ry5088_2755_7eb1909_rydfu.bin']);
   assert.deepStrictEqual(imgs.map((x) => x.keepsSettings), [true, false, false], 'stock and earlier builds warn about settings');

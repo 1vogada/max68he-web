@@ -4,6 +4,7 @@
 // they go to the same route handlers, running in the page over WebHID.
 const hid = require('node-hid');                    // web-build/node-hid.js (WebHID)
 const { callRoute, streams } = require('../src/web/server');
+const webFlash = require('./web-flash');            // the Updates page's flashing over WebHID
 
 const ready = hid.init().catch(() => false);        // devices granted on an earlier visit
 const realFetch = globalThis.fetch.bind(globalThis);
@@ -95,6 +96,8 @@ function connectBar() {
 document.addEventListener('DOMContentLoaded', async () => {
   document.documentElement.dataset.web = '1';
   const bar = connectBar();
+  // the desktop flash panel appears when the page initialises (maintenance.js); ours goes after it
+  for (let i = 0; i < 50 && !webFlash.mount(); i++) await new Promise((r) => setTimeout(r, 200));
   const sync = () => { bar.hidden = hid.devices().length > 0; };
   await ready;
   sync();

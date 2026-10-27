@@ -20,6 +20,7 @@ function fakeFirmwareDir() {
 process.env.MAX68HE_FIRMWARE_DIR = fakeFirmwareDir();
 delete require.cache[require.resolve('../src/flasher')];
 const F = require('../src/flasher');
+F.defaults.open = null;   // stubbed ry-flash: never open a real keyboard for the key-map backup
 
 // what ry-flash --json prints (flasher/src/main.rs): one JSON line on stdout, progress on stderr
 const PROGRESS = 'detected\nentering bootloader (stock firmware resets its config here)... 502A present.\n'
@@ -173,4 +174,13 @@ test('describeExit: Windows crash codes in hex', () => {
   assert.strictEqual(F.describeExit({ code: 3221225477 }), 'exit code 0xC0000005, crashed (access violation)');
   assert.strictEqual(F.describeExit({ code: -1073740791 }), 'exit code 0xC0000409, aborted');
   assert.strictEqual(F.describeExit({ code: 4 }), 'exit code 4');
+});
+
+test('a real flash keeps the key maps by default (open defaults to the MAX68HE); fake runners do not', () => {
+  const src = require('fs').readFileSync(require.resolve('../src/flasher'), 'utf8');
+  assert.match(src, /open = runner === run \? defaults\.open : null/);
+  delete require.cache[require.resolve('../src/flasher')];
+  const fresh = require('../src/flasher');
+  assert.strictEqual(typeof fresh.defaults.open, 'function', 'the default opener is set');
+  delete require.cache[require.resolve('../src/flasher')];
 });

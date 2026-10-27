@@ -5,6 +5,7 @@ const path = require('path');
 const P = require('./protocol');
 const { keyToMods } = require('./keys');
 const { SWITCH_LIMITS } = require('./limits');
+const KM = require('./key-map-backup');
 
 const FORMAT = 'max68he-profile';
 const H = P.HALL;
@@ -14,6 +15,7 @@ const MM_COLUMNS = [[H.ACTUATION, 'actuation'], [H.RELEASE, 'release'], [H.RT_PR
   [H.RT_RELEASE, 'rtRelease'], [H.DEAD_BOTTOM, 'deadZone']];
 // importProfile saves the profile it replaces here first (git-ignored)
 const BACKUP_DIR = path.join(__dirname, '..', 'config', 'backups');
+const KA_NOTE = 'Key action maps are one table for all profiles in the firmware';
 
 function isBytes(arr, len, max = 255) {
   return Array.isArray(arr) && arr.length === len && arr.every((v) => Number.isInteger(v) && v >= 0 && v <= max);
@@ -40,6 +42,11 @@ function validate(data, info) {
   }
   validateSwitches(data.hall, data.keymap[0], info, bad);
   validateRest(data, info, bad);
+  if (data.keyActions !== undefined) {   // optional; the records are what an import writes
+    const ka = data.keyActions;
+    if (!ka || typeof ka !== 'object' || Array.isArray(ka) || (ka.scope ?? 'global') !== 'global') bad('key action maps');
+    KM.checkMaps(ka.maps, bad);
+  }
 }
 
 function validateSwitches(hall, base, info, bad) {
@@ -121,7 +128,13 @@ module.exports = {
       options: await this.getOptions(),
       // multi-level DKS records (open firmware with DKS levels), by slot
       ...(await this.hasDksLevels() ? { dksLevels: await this._dksLevelsAll(hall[H.MODE]) } : {}),
+      // the whole key action map table (open firmware with keyActions): global, not per profile
+      ...(await this._hasKeyActions() ? { keyActions: { scope: 'global', note: KA_NOTE, maps: await KM.readMaps(this) } } : {}),
     };
+  },
+
+  async _hasKeyActions() {
+    try { return await KM.hasKeyActions(this); } catch { return false; }
   },
 
   // Restores a backup into the active profile. Everything is checked first, and the
@@ -139,7 +152,7 @@ module.exports = {
       backup = path.join(backupDir, `profile${profile}-${before.exportedAt.replace(/[:.]/g, '-')}.json`);
       fs.writeFileSync(backup, JSON.stringify(before, null, 1));
     }
-    const done = { keys: 0, parts: [] };
+    const done = { keys: 0, parts: [], notes: [] };
     try {
       await this._importWrites(data, profile, onStep, done);
     } catch (e) {
@@ -148,7 +161,7 @@ module.exports = {
         + (backup ? ` The profile from before the import is in ${backup}.` : '')),
       { status: e.status, device: e.device, written, backup });
     }
-    return { keyWrites: done.keys, backup };
+    return { keyWrites: done.keys, backup, ...(done.keyMaps && { keyMaps: done.keyMaps }), ...(done.notes.length && { notes: done.notes }) };
   },
 
   async _importWrites(data, profile, onStep, done) {
@@ -197,5 +210,20 @@ module.exports = {
       await this.setOptions({ antiMistouch, rtStability, wasdSwap });
       done.parts.push('options');
     }
+    if (!data.keyActions) return;   // an older export: the maps stay as they are
+    if (!(await KM.hasKeyActions(this))) {
+      done.notes.push('The file has key action maps, but this firmware has none; they were not written.');
+      return;
+    }
+    // An export is a full snapshot of the one global table, so the board ends with exactly the
+    // file's maps: others are removed, and maps already the same are not rewritten.
+    onStep('key action maps');
+    const r = await KM.writeMaps(this, data.keyActions.maps, { replace: true, onStep }).catch((e) => {
+      const n = e.keyMaps ? e.keyMaps.written.length + e.keyMaps.removed.length : 0;
+      if (n) done.parts.push(KM.plural(n, 'key action map change'));
+      throw e;
+    });
+    done.keyMaps = { written: r.written.length, removed: r.removed.length };
+    if (r.written.length || r.removed.length) done.parts.push('key action maps');
   },
 };

@@ -11,7 +11,7 @@ Status: ✅ have it (as good or better) · 🟡 partly · ❌ missing. Work: **f
 Open firmware (anyone can change it), AI/MCP control, macros, text keys (Unicode), up to 8 DKS levels
 (they have 4), 4 Fn layers + 3 extra layers, analog mouse from key depth, per-key travel calibration,
 key stats, live analog view, on-board games, depth-reactive lighting effects, per-key paint with 5
-pictures, scan-speed figures, one-click flashing with recovery, timed key / mouse sequences played by the keyboard itself (no PC jitter), with mouse glides along curves; per-key action maps with a Key wizard (depth / hold / tap -> keys, gamepad, mouse) (fw `4f1637a`, not flashed yet).
+pictures, scan-speed figures, one-click flashing with recovery, timed key / mouse sequences played by the keyboard itself (no PC jitter), with mouse glides along curves; per-key action maps with a Key wizard (depth / hold / tap -> keys, gamepad, mouse) (fw `4f1637a`, flashed 2026-10-27; maps kept over updates by the flasher).
 
 ## Gamepad (first: on par or better)
 
@@ -64,17 +64,17 @@ pictures, scan-speed figures, one-click flashing with recovery, timed key / mous
 | Colour picker with recently used colours | ✅ | ✅ (effects and paint) | |
 | Effect presets | ✅ | ✅ | |
 | RGB effect layers (effects stacked on keys) | ✅ | ❌ | fw |
-| Dim after N min, then off | ✅ | ✅ (fw `546bbbc`, built, not flashed yet) | |
+| Dim after N min, then off | ✅ | ✅ (fw `546bbbc`, flashed 2026-10-27 with `4f1637a`) | |
 
 ## Settings
 
 | Feature | Wootility | Us | Work |
 |---|---|---|---|
 | Polling rate 8000 / 1000 | ✅ | ✅ | |
-| Compatibility mode (6KRO for BIOS / consoles) | ✅ | ✅ (fw `546bbbc`, built, not flashed yet) | |
+| Compatibility mode (6KRO for BIOS / consoles) | ✅ | ✅ (fw `546bbbc`, flashed 2026-10-27 with `4f1637a`) | |
 | Num Lock indicator behaviour | ✅ | n/a: no Num Lock key or LED on this board | |
-| Debounce filter | ✅ | ✅ release debounce 0-10 ms (fw `546bbbc`, built, not flashed yet) | |
-| Reset all keyboard settings | ✅ | ✅ button with confirm, calibration kept (fw `546bbbc`, built, not flashed yet) | |
+| Debounce filter | ✅ | ✅ release debounce 0-10 ms (fw `546bbbc`, flashed 2026-10-27 with `4f1637a`) | |
+| Reset all keyboard settings | ✅ | ✅ button with confirm, calibration kept (fw `546bbbc`, flashed 2026-10-27 with `4f1637a`) | |
 | Firmware updates | ✅ | ✅ | |
 | Light theme | coming soon | ✅ | |
 | Languages | ✅ | ❌ | ui: strings table |
@@ -92,8 +92,10 @@ already speaks 64-byte feature reports, which WebHID has (`sendFeatureReport` / 
 - Host: GitHub Pages (static files, HTTPS, which WebHID needs). One page serves every user.
 - Stays local: the MCP server (AI control), and app-linked profile switching (a browser page can't see
   other apps; a small optional helper can).
-- Flashing: port ry-flash's updater protocol to WebHID (the updater is a HID device too), so updates
-  also run from the page; until then, the page links to the local flasher.
+- Flashing: ry-flash's updater protocol is ported to JavaScript (`src/ryflash.js`, same packets and waits,
+  tested against ry-flash's own vectors and a recorded run), so the page flashes open-firmware images over
+  WebHID (branch `web-flash`, not yet tried on hardware). Stock restore stays in the desktop app: the
+  vendor's download server sends no CORS headers.
 - Size: a few days; the transport and the server-to-browser move are the bulk.
 
 ## Order
@@ -103,5 +105,5 @@ already speaks 64-byte feature reports, which WebHID has (`sendFeatureReport` / 
 2. Gamepad XInput (fw, risky: tested with a recovery plan before flashing).
 3. Profiles: names, saved profiles, app-linked switching, undo / redo.
 4. ✅ Remap presets and drag and drop, active advanced keys list, colour history, effect presets (2026-10-27).
-5. ✅ Firmware options: compatibility mode, debounce, dim-then-off, reset button (Num Lock n/a); merged, flash pending.
+5. ✅ Firmware options: compatibility mode, debounce, dim-then-off, reset button (Num Lock n/a); flashed 2026-10-27.
 6. Switch selector, RGB effect layers, Analog SDK, languages.

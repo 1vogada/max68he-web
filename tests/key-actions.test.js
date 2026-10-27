@@ -6,7 +6,6 @@ const assert = require('node:assert');
 const P = require('../src/protocol');
 const K = require('../src/key-actions');
 const C = require('../web/key-actions-core');
-const { Keyboard } = require('../src/keyboard');
 
 const rec = (spec, slot = 14) => K.toRecord(K.parseSpec(spec), slot);
 const rule8 = (r) => rec({ slot: 14, rules: [r] }).slice(8, 16);
@@ -234,42 +233,7 @@ test('templates -> rules, and back to answers', () => {
   assert.deepStrictEqual(a.extra.map((r) => r.do.key), ['B', 'D']);
 });
 
-// Fake open firmware: CAPS plus a key action table like the contract (entries, max 6 rules).
-function fakeKeyboard({ caps2 = 1 << 15, entries = 4 } = {}) {
-  const sent = [], table = new Map();
-  const t = {
-    async query(p) {
-      sent.push(p);
-      const r = [...p];
-      if (p[0] === 0xf8) { r[8] = caps2 & 0xff; r[9] = caps2 >> 8; return r; }
-      if (p[0] !== 0xee) return r;
-      r.fill(0, 2);
-      const slot = p[2];
-      if (p[1] === 0) Object.assign(r, { 8: entries, 9: 6, 10: table.size, 11: 56 });
-      if (p[1] === 1) { r[3] = slot; if (table.has(slot)) r.splice(8, 56, ...table.get(slot)); else r[2] = 1; }
-      if (p[1] === 2) {
-        const body = p.slice(8, 64);
-        if (slot >= 128 || body[0] !== slot) r[2] = 4;
-        else if (body[1] > 6) { r[2] = 3; r[3] = 0xff; }
-        else if (!body[1]) table.delete(slot);
-        else if (!table.has(slot) && table.size >= entries) r[2] = 2;
-        else { table.set(slot, body); r.splice(8, 56, ...body); }
-      }
-      if (p[1] === 3) {
-        const list = [...table.keys()].sort((x, y) => x - y).filter((s) => s >= slot).slice(0, 2);   // 2 per page: paging is tested
-        Object.assign(r, { 3: list.length, 4: table.size });
-        list.forEach((s, i) => { r[8 + i] = s; });
-      }
-      return r;
-    },
-    async send(p) { sent.push(p); },
-    close() {},
-  };
-  const kb = new Keyboard(t);
-  kb.info = { custom: true, unitMm: 0.005 };
-  kb.listKeys = async () => [{ slot: 14, name: 'W' }, { slot: 9, name: 'A' }, { slot: 15, name: 'S' }, { slot: 21, name: 'D' }, { slot: 3, name: 'E' }];
-  return { kb, sent, table };
-}
+const { fakeKeyboard } = require('./fixtures/ka-fake');
 
 const WALK = { key: 'W', rules: [{ when: 'press', do: { axis: 'LY-', percent: 40 } }, { when: 'down', at: 2.5, do: { axis: 'LY-', percent: 100 } }] };
 

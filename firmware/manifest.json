@@ -1,0 +1,17 @@
+{
+ "format": "x68max-firmware",
+ "version": 1,
+ "images": [
+  {
+   "board": 2755,
+   "model": "MAX68HE",
+   "file": "x68max-2755-f17f883.bin",
+   "commit": "f17f8832628f803e25820203f7b1e6b9f423415e",
+   "committedAt": "2026-10-27T15:51:04+01:00",
+   "builtAt": "2026-10-27T15:52:28.063Z",
+   "size": 109356,
+   "sha256": "f6f94ee7034063c0d864c0239354a4381b7c52d50509281cc48f65f274fc73db",
+   "notes": "X68MAX.md: key action maps are kept over updates by the max68he flasher"
+  }
+ ]
+}

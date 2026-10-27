@@ -22,8 +22,11 @@ Most features work with the keyboard's stock firmware. Some (marked "open firmwa
 open-source firmware for this board, which isn't published yet. It is the open firmware by 1vogada, a fork
 of krodity/fun60-custom-firmware (MIT, © Pratyush Shukla).
 
-Not in the web version: flashing firmware, switching profiles with the app in front, and AI control.
-Those come with the desktop version (Node.js: `npm install`, then `npm run web`).
+Updates: the Updates page flashes an open-firmware image you choose (it checks the file first). The
+keyboard restarts into its updater, a separate USB device, so the browser asks you to pick that once too.
+
+Not in the web version: going back to the stock firmware, switching profiles with the app in front, and AI
+control. Those come with the desktop version (Node.js: `npm install`, then `npm run web`).
 
 ## Build it yourself
 

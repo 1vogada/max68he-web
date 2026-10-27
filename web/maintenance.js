@@ -112,6 +112,8 @@
         : j.outcome === 'write-failed' ? 'Result: failed during the update. Don\'t unplug the keyboard; flash it again.'
           : j.inUpdater ? 'Result: stopped before writing. The keyboard is in updater mode; click Flash again to finish.'
             : 'Result: failed before writing. The keyboard was not changed; safe to try again.'}`;
+      const km = j.keyMaps;   // key action maps kept over the update (flash-keymaps.js)
+      if (km?.kept) $('#flash-log').textContent += `\nKey maps: ${km.error ?? `${km.restored} of ${km.kept} restored.`}`;
       if (j.ok) {
         App.toast('Firmware flashed');
         setTimeout(async () => { try { App.applyState(await App.api('GET', '/api/state')); } catch { /* reconnects on its own */ } }, 2500);

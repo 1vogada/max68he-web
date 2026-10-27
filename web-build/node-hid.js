@@ -8,6 +8,8 @@
 // themselves on the next visit (init()). Devices are opened once and shared.
 const VID = 0x3151;
 const FILTERS = [{ vendorId: VID, usagePage: 0xffff }, { vendorId: VID, usagePage: 0xff00 }];
+// the keyboard's updater, a device of its own while a flash runs (src/ryflash.js)
+const UPDATER_FILTERS = [{ vendorId: VID, productId: 0x502a }];
 
 let hid = typeof navigator !== 'undefined' ? navigator.hid : null;
 let opened = [];                 // HIDDevice, opened, in the order they were found
@@ -36,12 +38,13 @@ async function init(api = hid) {
   return opened.length > 0;
 }
 
-// The browser's device picker (must run from a click). True when a keyboard was granted.
-async function request(api = hid) {
+// The browser's device picker (must run from a click). True when a device was granted.
+async function request(api = hid, filters = FILTERS) {
   hid = api;
   if (!hid) throw new Error('This browser has no WebHID: use Chrome, Edge or Opera on a computer.');
-  for (const d of await hid.requestDevice({ filters: FILTERS })) await add(d);
-  return opened.length > 0;
+  const picked = await hid.requestDevice({ filters });
+  for (const d of picked) await add(d);
+  return picked.some((d) => opened.includes(d));
 }
 
 const supported = () => Boolean(hid);
@@ -109,4 +112,4 @@ class HID {
   }
 }
 
-module.exports = { devices, HID, init, request, supported, onChange, FILTERS };
+module.exports = { devices, HID, init, request, supported, onChange, FILTERS, UPDATER_FILTERS };

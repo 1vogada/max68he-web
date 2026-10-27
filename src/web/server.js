@@ -46,6 +46,26 @@ const analogClients = new Set();
 let travelStop = null;
 let analogTimer = null;
 
+// Before a flash: ends the streams and closes the keyboard, so the flasher has it alone.
+async function release() {
+  for (const c of [...travelClients, ...analogClients]) c.end();
+  if (travelStop) await travelStop().catch(() => {});
+  if (conn.opening) await conn.opening.catch(() => {});   // an open already in flight would hold the keyboard
+  await drop();
+  await new Promise((r) => setTimeout(r, 300));
+}
+
+// The web version's flash (web-build/web-flash.js): fn runs with the keyboard released and
+// every request refused until it is done, as during POST /api/firmware/flash.
+async function whileFlashing(fn) {
+  if (flashing || flasher.job.running) throw httpError(409, 'a flash is already running');
+  flashing = true;
+  try {
+    await release();
+    return await fn();
+  } finally { flashing = false; }
+}
+
 const ANALOG_FILE = path.join(__dirname, '..', '..', 'config', 'analog.json');
 
 // The analog page's bindings + response as an on-board gamepad config. The board
@@ -306,15 +326,10 @@ const ROUTES = {
     if (!flasher.listImages().some((x) => x.id === id)) throw httpError(400, 'unknown firmware image');
     if (!flasher.flasherPresent()) throw httpError(400, `ry-flash not found at ${flasher.config().flasher}`);
     // set before flash() starts and cleared only when it has finished, retry waits included,
-    // so no other request reopens the keyboard mid-flash
+    // so no other request reopens the keyboard mid-flash (the key action maps go on a handle of its own)
     flashing = true;
-    flasher.flash(id, async () => {
-      for (const c of [...travelClients, ...analogClients]) c.end();
-      if (travelStop) await travelStop().catch(() => {});
-      if (conn.opening) await conn.opening.catch(() => {});   // an open already in flight would hold the keyboard
-      await drop();
-      await new Promise((r) => setTimeout(r, 300));
-    }).catch(() => {}).finally(() => { flashing = false; });
+    flasher.flash(id, release, undefined, { open: () => require('../keyboard').Keyboard.open({ key: models.DEFAULT.key }) })
+      .catch(() => {}).finally(() => { flashing = false; });
     return { started: true };
   },
   'POST /api/advanced/list': async () => ({ keys: await (await keyboard()).getAdvancedKeys() }),
@@ -560,4 +575,4 @@ if (require.main === module) {
 // streams: the browser build's EventSource stand-in subscribes like a response object would
 const streams = { addTravelClient, removeTravelClient, addAnalogClient, removeAnalogClient, analogState: () => engine.state() };
 
-module.exports = { server, ROUTES, callRoute, streams };
+module.exports = { server, ROUTES, callRoute, streams, whileFlashing };

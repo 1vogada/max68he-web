@@ -3,6 +3,9 @@
 // app (web/), plus site/driver.js, the driver bundled for the browser. Node-only modules
 // are swapped for web-build/ stand-ins: node-hid -> WebHID, fs -> localStorage, and the
 // lock, flasher and app watcher (desktop-only) -> stubs. Plugins are listed at build time.
+// Firmware: firmware/ (manifest.json, the open-firmware builds and their licences) goes on the
+// site as it is. The public repo has it (publish-firmware.js puts it there); MAX68HE_SITE_FIRMWARE
+// may name another folder. Without one the site gets an empty list and hosts no firmware.
 const fs = require('fs');
 const path = require('path');
 const esbuild = require('esbuild');
@@ -58,7 +61,10 @@ function copyDir(from, to) {
   }
 }
 
-async function build({ outDir = OUT, minify = true } = {}) {
+const FIRMWARE = process.env.MAX68HE_SITE_FIRMWARE
+  ?? (fs.existsSync(path.join(ROOT, 'firmware', 'manifest.json')) ? path.join(ROOT, 'firmware') : null);
+
+async function build({ outDir = OUT, minify = true, firmwareDir = FIRMWARE } = {}) {
   const list = plugins();
   fs.rmSync(outDir, { recursive: true, force: true });
   copyDir(path.join(ROOT, 'web'), outDir);
@@ -82,6 +88,11 @@ async function build({ outDir = OUT, minify = true } = {}) {
   fs.copyFileSync(path.join(SHIMS, 'web-version.css'), path.join(outDir, 'web-version.css'));
   fs.copyFileSync(path.join(SHIMS, 'THIRD_PARTY_NOTICES.md'), path.join(outDir, 'THIRD_PARTY_NOTICES.md'));
   fs.writeFileSync(path.join(outDir, '.nojekyll'), '');   // GitHub Pages: serve files as they are
+  if (firmwareDir) copyDir(firmwareDir, path.join(outDir, 'firmware'));
+  else {
+    fs.mkdirSync(path.join(outDir, 'firmware'));
+    fs.writeFileSync(path.join(outDir, 'firmware', 'manifest.json'), '{ "images": [] }\n');   // an empty list
+  }
   build.inputs = Object.keys(r.metafile.inputs);          // what went into driver.js (tests check it)
   return outDir;
 }

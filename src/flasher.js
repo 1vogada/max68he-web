@@ -6,14 +6,18 @@
 // Settings: the open firmware keeps its settings in flash pages above the app slot
 // (0x08028000..), which the updater never erases, so open -> open keeps them. Leaving the
 // stock firmware resets its config, and stock may not read what the open firmware stored.
+// Key action maps are the exception: their sector (0x08027800) is erased by every update, so
+// flash() keeps and restores them (flash-keymaps.js) when it is given a way to open the keyboard.
 //
 // Paths default to a sibling x68max-firmware checkout; config/flash.json may set
 // { "flasher": "<ry-flash.exe>", "firmwareDir": "<x68max-firmware>" }.
 const fs = require('fs');
 const path = require('path');
 const cp = require('child_process');
+const { keepKeyMaps, restoreKeyMaps } = require('./flash-keymaps');
 
 const ROOT = path.join(__dirname, '..');
+const BACKUP_DIR = path.join(ROOT, 'config', 'backups');   // as backup.js (git-ignored)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function config() {
@@ -53,7 +57,8 @@ function listImages() {
 function flasherPresent() { return fs.existsSync(config().flasher); }
 
 // outcome: 'ok' | 'not-written' (nothing changed, safe to retry) | 'write-failed' (keep it plugged in, flash again)
-const job = { running: false, log: [], ok: null, error: null, outcome: null, inUpdater: false, image: null, startedAt: null };
+// keyMaps: null (nothing to keep) or { kept, restored, file, error }
+const job = { running: false, log: [], ok: null, error: null, outcome: null, inUpdater: false, image: null, startedAt: null, keyMaps: null };
 
 // Runs ry-flash; each stderr line goes to onLine as it arrives (ry-flash ends chunk
 // progress with \r, so \r counts as a line end). stdout is kept whole for the JSON result.
@@ -132,22 +137,37 @@ function classify(r) {
 }
 
 // Flashes image `id`; `prepare` closes the keyboard first. Resolves when done (job has the result).
-async function flash(id, prepare = async () => {}, runner = run) {
+// open() opens the keyboard on its own handle (or gives null) to keep the key action maps before
+// the flash and write them back after. A real flash opens the MAX68HE by default, so no caller can
+// forget it (a forgotten one lost the maps on hardware); open: null skips it, fake runners default to null.
+// (tests that stub ry-flash set defaults.open = null so they never touch a real keyboard)
+const defaults = { open: () => require('./keyboard').Keyboard.open({ key: 'max68he' }) };
+async function flash(id, prepare = async () => {}, runner = run,
+  { open = runner === run ? defaults.open : null, backupDir = BACKUP_DIR, reopenTries, reopenMs } = {}) {
   if (job.running) throw Object.assign(new Error('a flash is already running'), { status: 409 });
   const img = listImages().find((x) => x.id === id);
   if (!img) throw Object.assign(new Error('unknown firmware image'), { status: 400 });
   const { flasher } = config();
   if (!fs.existsSync(flasher) && runner === run) throw Object.assign(new Error(`ry-flash not found at ${flasher}`), { status: 400 });
-  Object.assign(job, { running: true, log: [], ok: null, error: null, outcome: null, inUpdater: false, image: img.name, startedAt: new Date().toISOString() });
+  Object.assign(job, { running: true, log: [], ok: null, error: null, outcome: null, inUpdater: false, image: img.name, startedAt: new Date().toISOString(), keyMaps: null });
   const say = (line) => { job.log.push(line); };
   const fail = (outcome, msg) => { Object.assign(job, { ok: false, outcome, error: msg }); say(`Error: ${msg}`); return job; };
   const writeFailed = (msg) => fail('write-failed', `Failed during the update: ${msg}. Don't unplug the keyboard; `
-    + 'flash it again (the updater itself is never touched, so a new flash recovers it).');
+    + 'flash it again (the updater itself is never touched, so a new flash recovers it).'
+    + (job.keyMaps?.file ? ` The key maps were not restored; the backup is in ${job.keyMaps.file}.` : ''));
   // after a run stopped on the way to the updater the keyboard may be waiting there
   const unchanged = (tail) => (job.inUpdater ? 'The keyboard is in updater mode; click Flash again to finish.' : `The keyboard was not changed${tail}`);
   let ran = false;
   try {
     await prepare();
+    const kept = open ? await keepKeyMaps(open, { backupDir, say }) : { maps: null, keyMaps: null };
+    if (kept.stop) return fail('not-written', kept.stop + '.');
+    job.keyMaps = kept.keyMaps;
+    const stock = id === 'stock';
+    if (stock && kept.maps?.length) {
+      say(`Warning: the stock firmware has no key action maps, so the ${kept.maps.length} kept here can't survive; they stay in ${kept.file}.`);
+      job.keyMaps.error = `not restored (stock firmware); the backup is in ${kept.file}`;
+    }
     say(`Flashing ${img.name} (${img.size} bytes)…`);
     for (let attempt = 1; attempt <= 3; attempt++) {
       ran = true;
@@ -163,6 +183,7 @@ async function flash(id, prepare = async () => {}, runner = run) {
         if (c.res?.mode === 'recover' && c.res.post_dev_id != null && c.res.post_dev_id !== 2755)
           say(`Warning: flashed from updater mode without a model check, and the keyboard now reports model ${c.res.post_dev_id}, not 2755.`);
         say('Done: the keyboard is back with the new firmware.');
+        if (!stock && kept.maps?.length) await restoreKeyMaps(open, kept.maps, job.keyMaps, { say, tries: reopenTries, waitMs: reopenMs });
         return job;
       }
       if (c.kind === 'broken') return writeFailed(c.message);
@@ -180,4 +201,4 @@ async function flash(id, prepare = async () => {}, runner = run) {
   }
 }
 
-module.exports = { listImages, flasherPresent, flash, job, config, classify, run, describeExit };
+module.exports = { defaults, listImages, flasherPresent, flash, job, config, classify, run, describeExit };

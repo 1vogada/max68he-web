@@ -3,3 +3,21 @@
   margin: 0 0 14px; padding: 12px 14px; border: 1px solid var(--accent); border-radius: 10px;
   background: var(--accent-soft); font-size: 14px; }
 .web-connect[hidden] { display: none; }
+
+/* web version only: flashing over WebHID (web-flash.js) replaces the desktop flash panel */
+html[data-web] #flash-panel { display: none !important; }
+.wf-steps { margin: 10px 0; padding-left: 22px; font-size: 14px; line-height: 1.7; }
+.wf-steps li { color: var(--muted); }
+.wf-steps li[data-state="now"] { color: var(--text); font-weight: 600; }
+.wf-steps li[data-state="ok"] { color: var(--text); }
+.wf-steps li[data-state="ok"]::after { content: " ✓"; color: var(--accent); }
+.wf-steps li[data-state="skip"]::after { content: " (nothing to do)"; }
+.wf-steps li[data-state="fail"] { color: var(--danger, #d33); }
+.wf-steps li[data-state="fail"]::after { content: " ✗"; }
+.wf-bar { height: 8px; border-radius: 4px; background: var(--accent-soft); overflow: hidden; margin: 8px 0 12px; }
+.wf-bar[hidden], .wf-pick[hidden], .wf-recover[hidden] { display: none; }
+.wf-bar > div { height: 100%; width: 0; background: var(--accent); transition: width 0.2s; }
+.wf-pick { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 8px 0; padding: 10px 12px;
+  border: 1px solid var(--accent); border-radius: 10px; background: var(--accent-soft); font-size: 14px; }
+.wf-recover { padding: 8px 10px; border-radius: 8px; background: var(--accent-soft); }
+#wf-check.error { color: var(--danger, #d33); }

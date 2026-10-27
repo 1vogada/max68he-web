@@ -147,7 +147,7 @@ test('fs stand-in: files in localStorage, directories implied, backups capped', 
 test('the web build bundles: driver before the page scripts, no Node-only modules inside', async () => {
   const fs = require('fs'), os = require('os'), path = require('path');
   const { build } = require('../scripts/build-web');
-  const out = await build({ outDir: fs.mkdtempSync(path.join(os.tmpdir(), 'max68he-site-')), minify: false });
+  const out = await build({ outDir: fs.mkdtempSync(path.join(os.tmpdir(), 'max68he-site-')), minify: false, firmwareDir: null });
   const html = fs.readFileSync(path.join(out, 'index.html'), 'utf8');
   assert.ok(html.indexOf('driver.js') > 0 && html.indexOf('driver.js') < html.indexOf('ui.js'));
   const js = fs.readFileSync(path.join(out, 'driver.js'), 'utf8');
@@ -157,6 +157,10 @@ test('the web build bundles: driver before the page scripts, no Node-only module
   assert.ok(js.includes('requestDevice'), 'the WebHID stand-in is in');
   assert.ok(fs.existsSync(path.join(out, 'plugins', 'games')), 'plugin files copied');
   assert.ok(fs.existsSync(path.join(out, 'THIRD_PARTY_NOTICES.md')), 'notices on the site');
+  // flashing over WebHID is in; no firmware image is on the site unless a build asks for one
+  assert.ok(build.inputs.some((i) => i.endsWith('src/ryflash.js')) && build.inputs.some((i) => i.endsWith('web-build/web-flash.js')));
+  assert.deepStrictEqual(fs.readdirSync(path.join(out, 'firmware')), ['manifest.json'], 'no firmware hosted by default');
+  assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(out, 'firmware', 'manifest.json'), 'utf8')).images, []);
   // THIRD_PARTY_NOTICES.md says no package's code is bundled: keep it true
   assert.deepStrictEqual(build.inputs.filter((i) => i.includes('node_modules')), []);
   fs.rmSync(out, { recursive: true, force: true });

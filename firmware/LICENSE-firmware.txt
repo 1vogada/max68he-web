@@ -1,0 +1,79 @@
+X68MAX open firmware: binary builds for the Attack Shark MAX68HE / X68MAX (board 2755)
+
+The .bin files in this folder are compiled builds. They contain code under several licences.
+The notices required for redistributing them in binary form are below and in the files next to
+this one.
+
+1. The X68MAX firmware's own changes (everything not covered by 2 to 6)
+
+   Copyright (c) 2026 Ivo Petkov (1vogada). All rights reserved.
+   You may use these binaries to flash your own keyboard. No other rights are granted.
+
+2. fun60-custom-firmware (krodity/fun60-custom-firmware), which the X68MAX firmware is a fork of
+
+   MIT License
+
+   Copyright (c) 2026 Pratyush Shukla
+
+   Permission is hereby granted, free of charge, to any person obtaining a copy
+   of this software and associated documentation files (the "Software"), to deal
+   in the Software without restriction, including without limitation the rights
+   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+   copies of the Software, and to permit persons to whom the Software is
+   furnished to do so, subject to the following conditions:
+
+   The above copyright notice and this permission notice shall be included in all
+   copies or substantial portions of the Software.
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+   SOFTWARE.
+
+   (Also in LICENSE-fun60-MIT.txt.)
+
+3. Artery AT32F402_405 Firmware Library (peripheral drivers, CMSIS device support, USB device
+   stack, and the startup / clock / interrupt templates derived from it)
+
+   The library's licence is BSD 3-Clause, Copyright (c) 2022, Artery-MCU: see
+   LICENSE-ARTERY-BSD-3-Clause.txt for its full text and disclaimer, which binary
+   redistributions must reproduce. Its source files also carry this notice:
+
+   Copyright (c) 2025, Artery Technology, All rights reserved.
+
+   The software Board Support Package (BSP) that is made available to
+   download from Artery official website is the copyrighted work of Artery.
+   Artery authorizes customers to use, copy, and distribute the BSP
+   software and its related documentation for the purpose of design and
+   development in conjunction with Artery microcontrollers. Use of the
+   software is governed by this copyright notice and the following disclaimer.
+
+   THIS SOFTWARE IS PROVIDED ON "AS IS" BASIS WITHOUT WARRANTIES,
+   GUARANTEES OR REPRESENTATIONS OF ANY KIND. ARTERY EXPRESSLY DISCLAIMS,
+   TO THE FULLEST EXTENT PERMITTED BY LAW, ALL EXPRESS, IMPLIED OR
+   STATUTORY OR OTHER WARRANTIES, GUARANTEES OR REPRESENTATIONS,
+   INCLUDING BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE, OR NON-INFRINGEMENT.
+
+   These binaries run only on the keyboard's Artery AT32F405 microcontroller.
+
+4. CMSIS-Core (Cortex-M4) headers, Copyright (c) 2009-2021 Arm Limited
+
+   Apache License, Version 2.0: see LICENSE-APACHE-2.0.txt. No changes were made to them.
+
+5. newlib and libgloss (the C and maths library parts linked in: memory and string functions,
+   malloc, stdio stubs, float maths), from the Arm GNU Toolchain 14.2
+
+   Their copyright notices and licences are in COPYING.NEWLIB and COPYING.LIBGLOSS.
+
+6. libgcc (64-bit division helpers), from GCC 14.2
+
+   GPL-3.0 with the GCC Runtime Library Exception, which allows distributing the compiled
+   result under any terms; no notice is required.
+
+The X68MAX firmware is not made, endorsed or supported by Attack Shark, RongYuan, Artery or
+Arm. Flashing it replaces the keyboard's firmware; the keyboard's updater is never changed, so
+flashing again (or the desktop app's stock restore) always recovers it.

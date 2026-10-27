@@ -330,6 +330,17 @@ module.exports = {
       const r = await this._kaQuery(P.kaGetPacket(slot));
       return r[2] === 1 ? null : fromRecord(r.slice(8, 64), name);
     }
+    const names = new Map((await this.listKeys()).map((k) => [k.slot, k.name]));
+    return (await this._kaRecords()).map(({ slot, record }) => fromRecord(record, names.get(slot)));
+  },
+
+  // every map as the raw 56-byte record: [{ slot, record }] (backups, key-map-backup.js)
+  async keyActionRecords() {
+    await this._requireKeyActions();
+    return this._kaRecords();
+  },
+
+  async _kaRecords() {
     const slots = [];
     for (let start = 0; start < P.SLOTS;) {
       const r = await this._kaQuery(P.kaListPacket(start));
@@ -338,13 +349,18 @@ module.exports = {
       if (!got.length || slots.length >= r[4]) break;
       start = got[got.length - 1] + 1;
     }
-    const names = new Map((await this.listKeys()).map((k) => [k.slot, k.name]));
     const out = [];
     for (const slot of slots) {
       const r = await this._kaQuery(P.kaGetPacket(slot));
-      if (r[2] === 0) out.push(fromRecord(r.slice(8, 64), names.get(slot)));
+      if (r[2] === 0) out.push({ slot, record: r.slice(8, 64) });
     }
     return out;
+  },
+
+  // writes one raw record as it is (an all-0 record past the slot byte removes the map);
+  // the caller checked caps and the record (key-map-backup.js)
+  async _kaSetRecord(slot, record) {
+    await this._kaQuery(P.kaSetPacket(slot, record));
   },
 
   // spec: see key-actions.js; checked before anything is sent. Returns the map as stored.

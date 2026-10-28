@@ -6,6 +6,7 @@
 const P = require('./protocol');
 const { parseKey } = require('./keys');
 const C = require('./kbcode-core');
+const { runScriptWeb } = require('./kbcode-sandbox-web');
 
 const TIMEOUT_MS = 1000;
 const BOOT_MS = 2000;            // a worker's start and the read back, on top of the script's own time
@@ -15,10 +16,12 @@ const fail = (message) => ({ error: { line: 0, col: 0, message } });
 // Runs the API (apiSource with meta) and then the script in a worker thread (kbcode-sandbox.js): its
 // own isolate with a memory cap, a fresh node:vm context inside, 1 s for the script. The worker is
 // killed when the script's promises keep it busy past that. -> Promise<{ json } | { error }>.
+// In a browser (the web version) the sandbox is a Web Worker instead (kbcode-sandbox-web.js).
 function runScript(apiSource, meta, code, { timeout = TIMEOUT_MS } = {}) {
   // process.getBuiltinModule keeps the web build (esbuild, browser) from bundling worker_threads
   const wt = globalThis.process?.getBuiltinModule?.('node:worker_threads');
-  if (!wt) return Promise.resolve(fail('kbcode needs a sandbox to run scripts (worker threads); the web version has none yet'));
+  if (!wt && typeof globalThis.Worker === 'function') return runScriptWeb(apiSource, meta, code, { timeout });
+  if (!wt) return Promise.resolve(fail('kbcode needs a sandbox to run scripts (worker threads or Web Workers); none here'));
   return new Promise((resolve) => {
     let settled = false;
     const end = (r) => { if (settled) return; settled = true; clearTimeout(timer); worker.terminate().catch(() => {}); resolve(r); };

@@ -143,7 +143,9 @@ async function removeAnalogClient(res) {
 async function state() {
   const k = await keyboard();
   const caps = k.info.custom ? await k.getCaps() : null;
-  const feats = caps ? caps.features : [];
+  const feats = caps ? [...caps.features] : [];
+  // 'keyModes': key action engine 2 (conditions, modes, mouse keys), from the 0xEE INFO reply
+  if (feats.includes('keyActions') && (await k.keyActionsInfo()).engine >= 2) feats.push('keyModes');
   const hasOL = feats.includes('optionsLayers');
   return {
     info: k.info,
@@ -159,6 +161,7 @@ async function state() {
     // open firmware: user layers 1..3 (named entries only) and its options
     features: feats,
     hostApi: caps ? caps.api : 0,
+    memory: caps?.memory ?? null,   // flash / RAM use (caps 'memReport'), null = not reported
     layers: hasOL ? await Promise.all([1, 2, 3].map(async (n) => (await k.getLayer(n))
       .map((v, slot) => ({ slot, name: slotName(v) })).filter((x) => x.name))) : null,
     fwOptions: hasOL ? await k.getFirmwareOptions() : null,
@@ -457,8 +460,11 @@ const myProfiles = profileRoutes({ keyboard, conn, drop, isDeviceError, isFlashi
 Object.assign(ROUTES, myProfiles.routes);
 Object.assign(ROUTES, require('./remap-routes').remapRoutes({ keyboard, state, httpError, intIn, keyValue, slotName }));   // POST /api/remap/batch
 Object.assign(ROUTES, require('./sequence-routes').sequenceRoutes({ keyboard, httpError }));   // /api/sequence/play|stop|status|preview
-Object.assign(ROUTES, require('./key-action-routes').keyActionRoutes({ keyboard, httpError }));   // /api/key-actions (GET ?key=, POST, DELETE, preview)
-ROUTES['GET /api/plugins'] = async () => PLUGINS.map((p) => ({ name: p.name ?? p.id, scripts: p.scripts, styles: p.styles }));
+Object.assign(ROUTES, require('./key-action-routes').keyActionRoutes({ keyboard, httpError }));
+Object.assign(ROUTES, require('./key-blocks-routes').keyBlocksRoutes({ httpError }));   // /api/key-blocks: the Blocks workspace (config/key-blocks.json)   // /api/key-actions (GET ?key=, POST, DELETE, preview, batch), /api/modes
+Object.assign(ROUTES, require('./kbcode-routes').kbcodeRoutes({ keyboard, httpError }));   // /api/kbcode/check|apply|docs (docs/KBCODE.md)
+Object.assign(ROUTES, require('./fw-builder-routes').fwBuilderRoutes());   // /api/firmware/features|size|build (src/fw-builder.js)
+ROUTES['GET /api/plugins'] =async () => PLUGINS.map((p) => ({ name: p.name ?? p.id, scripts: p.scripts, styles: p.styles }));
 
 function readBody(req) {
   return new Promise((resolve, reject) => {

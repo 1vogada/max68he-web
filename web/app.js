@@ -430,7 +430,7 @@ function pageReason(id) {
 function applyState(s) {
   Object.assign(st, { keys: s.keys, switches: s.switches, lighting: s.lighting, profile: s.profile,
     fn: new Map(s.fn.map((x) => [x.slot, x.name])), pollingRateHz: s.pollingRateHz, functions: s.functions, keyNames: s.keyNames ?? [],
-    info: s.info, options: s.options,
+    info: s.info, options: s.options, memory: s.memory ?? null,
     layers: (s.layers ?? [[], [], []]).map((l) => new Map(l.map((x) => [x.slot, x.name]))), fwOptions: s.fwOptions,
     openModes: s.openModes ?? {}, features: s.features ?? [], hostApi: s.hostApi ?? 0,
     fnLayers: (s.fnLayers ?? [[], [], []]).map((l) => new Map(l.map((x) => [x.slot, x.name]))) });
@@ -452,6 +452,7 @@ function applyState(s) {
   window.LAYOUT = window.LAYOUTS[s.info.model] ?? window.LAYOUTS.max68he;
   $('#model-name').textContent = s.info.modelName ?? 'MAX68HE';
   $('#board').textContent = `${s.info.model === 'x82he' ? '' : 'X68MAX · '}fw ${fwText()}${s.info.custom ? ' (open)' : ''}`;
+  window.MemBar?.render($('#mem-bar'), s.memory, s.info.custom);
   // continuous RT exists only on the open firmware
   App.ui.gate($('#cont-rt'), s.info.custom ? null : App.ui.firmwareReason('Continuous rapid trigger'));
   setConnected(true);
@@ -469,7 +470,7 @@ const TITLES = {
   quick: 'Quick settings', profiles: 'My profiles',
   actuation: 'Actuation point', rt: 'Rapid trigger', travel: 'Analog view', keymap: 'Remap', fn: 'Remap',
   layers: 'Remap', stats: 'Key stats',
-  analog: 'Gamepad', advanced: 'Advanced keys', macros: 'Advanced keys', texts: 'Advanced keys', lighting: 'RGB settings', paint: 'RGB settings',
+  analog: 'Gamepad', wizard: 'Key wizard', advanced: 'Advanced keys', macros: 'Advanced keys', texts: 'Advanced keys', lighting: 'RGB settings', paint: 'RGB settings',
   settings: 'General settings', updates: 'Updates', interface: 'Interface',
 };
 
@@ -479,6 +480,7 @@ const HINTS = {
   travel: 'Press keys: the fill shows how far each key is down, live, and the white line is its actuation point. Nothing here changes settings.',
   stats: 'How often each key was pressed since the keyboard was plugged in. Stronger colours were pressed more.',
   analog: 'Turn keys into gamepad sticks, triggers and buttons: the deeper you press, the further the stick moves. Click a key to bind it; press keys to see the controller move.',
+  wizard: 'Per key, say what happens at which depth or after how long it is held: keys, gamepad and mouse. Click a key, pick a starting point and answer the questions.',
   keymap: 'Click a key to choose what it sends. Highlighted keys send something other than their label.',
   fn: 'What each key does while Fn is held. There are four Fn layers: on the keyboard Fn + Home / Del / PgUp / PgDn picks which one Fn uses. Keys left empty do what they do without Fn. Click a key to change it.',
   layers: 'Three extra keymaps you reach with layer keys: put MO1-3 (held) or TG1-3 (switch on and off) on a key in Remap. Keys left empty here do what the layer below does. Click a key to change it.',
@@ -492,12 +494,13 @@ const HINTS = {
   settings: 'Polling rate, keyboard and firmware options, and key calibration.',
   updates: 'Put new firmware on the keyboard, or go back to the stock firmware.',
   interface: 'How this page looks and which extra pages it shows. Nothing here changes the keyboard.',
+  'wizard:code': 'Describe the keyboard in a short script: keys, actuation, layers, lighting, macros, key actions. Check shows what would change; Apply writes it. Click a key on the board to put its name in the script.',
 };
 
 // ---- pages --------------------------------------------------------------------
 
 function showPage() {
-  $('#hint').textContent = HINTS[st.view] ?? '';
+  $('#hint').textContent = HINTS[`${st.view}:${document.body.dataset.kw}`] ?? HINTS[st.view] ?? '';   // 'wizard:code': a tab's own hint
   $('#page-title').textContent = TITLES[st.view] ?? st.view;
   const model = st.info?.modelName ?? 'MAX68HE';
   document.title = `${TITLES[st.view] ?? model} · ${model}`;
@@ -545,6 +548,7 @@ async function init() {
     applyState(await api('GET', '/api/state'));
   } catch (e) {
     $('#board').textContent = 'not connected';
+    $('#mem-bar').hidden = true;
     setConnected(false, e.message);
     toast(e.message, true);
   }
@@ -602,7 +606,7 @@ async function loadPlugins() {
 
 // Shared with the feature modules (keymap.js, paint.js, macros.js…).
 window.App = Object.assign(window.App || {}, {
-  st, keyEls, api, toast, busy, paintKeys, applyState, onSelectionChange, $, $$, addView, goto, pageReason, fwText, drawProfiles,
+  st, keyEls, api, toast, busy, paintKeys, applyState, onSelectionChange, $, $$, addView, goto, pageReason, fwText, drawProfiles, showPage,
 });
 
 init();

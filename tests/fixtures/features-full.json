@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "profile": "2755",
+  "sizes": { "commit": "abc1234", "measured": "2026-10-28", "full": { "flash": 120000, "ram": 90000 }, "limits": { "flash": 132608, "ram": 104448 } },
+  "alwaysOn": [ { "name": "Hall sensor scan", "reason": "the keyboard needs it" }, { "name": "USB", "reason": "the keyboard needs it" } ],
+  "features": [
+    { "id": "games", "make": "GAMES", "default": 1, "requires": [], "caps": ["games"], "group": "games", "storage": "none", "cost": { "flash": 9000, "ram": 2000 }, "name": "Games", "description": "Game mode and on-board games." },
+    { "id": "fx", "make": "FX", "default": 1, "requires": [], "caps": ["fxEffects"], "group": "lighting", "storage": "none", "cost": { "flash": 5000, "ram": 1500 }, "name": "Key-reactive lighting", "description": "Reactive effects." },
+    { "id": "pfx", "make": "PFX", "default": 1, "requires": [], "caps": ["pressureFx"], "group": "lighting", "storage": "none", "cost": { "flash": 12000, "ram": 8000 }, "name": "Pressure lighting", "description": "Pressure effects." },
+    { "id": "droplet", "make": "DROPLET", "default": 1, "requires": [], "caps": ["droplet"], "group": "lighting", "storage": "none", "name": "Droplet lighting", "description": "Droplet." },
+    { "id": "sequence", "make": "SEQUENCE", "default": 1, "requires": [], "caps": ["sequence"], "group": "input", "storage": "none", "cost": { "flash": 3000, "ram": 600 }, "name": "Play sequence", "description": "Sequences." },
+    { "id": "glide", "make": "GLIDE", "default": 1, "requires": ["sequence"], "caps": ["sequenceGlide"], "group": "input", "storage": "none", "cost": { "flash": 1200, "ram": 100 }, "name": "Glides", "description": "Mouse glides." },
+    { "id": "text", "make": "TEXT", "default": 1, "requires": [], "caps": ["textKeys"], "group": "input", "storage": "Saved texts stay on the keyboard.", "cost": { "flash": 2000, "ram": 300 }, "name": "Text keys", "description": "Keys that type a text." },
+    { "id": "keyact", "make": "KEYACT", "default": 1, "requires": [], "caps": ["keyActions"], "group": "input", "storage": "Key action maps stay stored.", "cost": { "flash": 8000, "ram": 3000 }, "name": "Key actions", "description": "Per-key actions by depth and time." },
+    { "id": "modes", "make": "MODES", "default": 1, "requires": ["keyact"], "caps": ["modes"], "group": "input", "storage": "Mode names stay.", "cost": { "flash": 1500, "ram": 200 }, "name": "Modes", "description": "Switchable key modes." },
+    { "id": "mousekeys", "make": "MOUSEKEYS", "default": 1, "requires": ["keyact"], "caps": [], "group": "input", "storage": "none", "cost": { "flash": 2500, "ram": 400 }, "name": "Mouse keys", "description": "Keys move the mouse." },
+    { "id": "mk_pressure", "make": "MK_PRESSURE", "default": 1, "requires": ["mousekeys"], "caps": [], "group": "input", "storage": "none", "cost": { "flash": 700, "ram": 50 }, "name": "Pressure mouse", "description": "Depth sets the mouse speed." },
+    { "id": "user_layers", "make": "USER_LAYERS", "default": 1, "requires": [], "caps": [], "group": "layers", "storage": "Layer keys stay stored.", "cost": { "flash": 1800, "ram": 900 }, "name": "Layers 1-3", "description": "Extra keymaps." },
+    { "id": "calib", "make": "CALIB", "default": 1, "requires": [], "caps": ["calibration"], "group": "system", "storage": "Calibration stays.", "cost": { "flash": 2200, "ram": 700 }, "name": "Calibration", "description": "Per-key travel calibration." },
+    { "id": "watchdog", "make": "WATCHDOG", "default": 1, "requires": [], "caps": [], "group": "system", "storage": "none", "cost": { "flash": 300, "ram": 0 }, "name": "Watchdog", "description": "Restarts a hung keyboard." }
+  ]
+}

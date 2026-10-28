@@ -3,12 +3,14 @@
 // sentences are shared with the web UI (web/key-actions-core.js).
 //
 // { key: 'W' | slot: 12, press?: mm (0.3), gap?: mm (0.1), alsoType?: false,
-//   rules: [{ when, at?, ms?, mode?, do }] }   (up to 6 rules; see key-actions-core.js)
+//   rules: [{ when, at?, ms?, mode?, if?, do }] }   (up to 6 rules; see key-actions-core.js; `if`, mode
+//   outputs and mouse keys (engine 2; a mouse keys rule takes 2 rule slots, 3 with speedBy pressure / both) in key-modes.js)
 // Wire units: depths in centi-mm (press 1..400, gap 1..50, at 10..400), hold / tap 10..10000 ms,
 // axis-depth from / to in 0.1 mm (0 <= from < to <= 4 mm), glide dx dy / 4 (+-508 px) over 10..2550 ms.
 const P = require('./protocol');
 const { keyToMods, modsToName } = require('./keys');
 const C = require('../web/key-actions-core');
+const M = require('./key-modes');
 
 const fail = (where, msg) => Object.assign(new Error(where ? `${where}: ${msg}` : msg), { status: 400 });
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -17,7 +19,9 @@ const AXIS_IDX = lower(C.AXES), BUTTON_IDX = lower(C.BUTTONS);
 const MOUSE_NAMES = { l: 1, left: 1, r: 2, right: 2, m: 4, middle: 4 };
 const DO_FIELDS = { key: ['key'], gamepad: ['gamepad'], axis: ['axis', 'percent'], axisDepth: ['axis', 'from', 'to'],
   mouse: ['mouse'], move: ['move'], glide: ['glide', 'ms'], wheel: ['wheel'] };
-const DO_HELP = 'do is { key }, { gamepad }, { axis, percent }, { axis, from, to }, { mouse }, { move: [dx, dy] }, { glide: [dx, dy], ms } or { wheel }';
+const DO_HELP = 'do is { key }, { gamepad }, { axis, percent }, { axis, from, to }, { mouse }, { move: [dx, dy] }, { glide: [dx, dy], ms }, { wheel }, '
+  + '{ mode, action }, { leaveAllModes: true } or { mouseKeys, start?, max?, rampMs?, curve?, power?, shareSpeed?, keepMs?, speedBy?, pressFrom?, pressTo? }';
+const kindOf = (d) => C.outputKind(d) ?? M.newKind(d);
 const int8 = (v) => (v > 127 ? v - 256 : v);
 
 function only(obj, fields, where) {
@@ -36,12 +40,13 @@ function int(v, lo, hi, what, where) {
 // mm -> centi-mm (0.01 mm steps)
 const cmm = (v, lo, hi, what, where) => Math.round(num(v, lo / 100, hi / 100, what, where, ' mm') * 100);
 
-function output(d, where) {
+function output(d, where, ctx) {
   if (!isObj(d)) throw fail(where, DO_HELP);
-  const kind = C.outputKind(d);
+  const kind = kindOf(d);
   if (!kind) throw fail(where, DO_HELP);
-  only(d, DO_FIELDS[kind], where);
   const w = `${where}.do`;
+  if (!C.outputKind(d)) return M.parseNewOutput(d, kind, w, ctx);
+  only(d, DO_FIELDS[kind], where);
   switch (kind) {
     case 'key': {
       if (typeof d.key !== 'string' || !d.key.trim()) throw fail(w, 'key is a key name like "Shift", "E" or "Ctrl+C"');
@@ -90,10 +95,10 @@ function output(d, where) {
   }
 }
 
-function rule(r, i) {
+function rule(r, i, ctx, self) {
   const where = `rules[${i}]`;
-  if (!isObj(r)) throw fail(where, 'a rule is { when, at?, ms?, mode?, do }');
-  only(r, ['when', 'at', 'ms', 'mode', 'do'], where);
+  if (!isObj(r)) throw fail(where, 'a rule is { when, at?, ms?, mode?, if?, do }');
+  only(r, ['when', 'at', 'ms', 'mode', 'if', 'do'], where);
   const t = C.TRIGGERS.indexOf(r.when);
   if (t < 0) throw fail(where, `when is ${C.TRIGGERS.join(', ')}`);
   let tval = 0;
@@ -104,18 +109,27 @@ function rule(r, i) {
     if (r.at !== undefined) throw fail(where, `${r.when} takes ms, not at`);
     tval = int(r.ms, 10, 10000, 'ms', where);
   } else if (r.at !== undefined || r.ms !== undefined) throw fail(where, `${r.when} takes no at or ms`);
-  const out = output(r.do, where);
-  const kind = C.outputKind(r.do);
-  const mode = r.mode ?? C.defaultMode(r);
+  const { arg, depth, ...out } = output(r.do, where, ctx);
+  const kind = kindOf(r.do), fresh = !C.outputKind(r.do);
+  const mode = r.mode ?? (fresh ? M.newDefaultMode(r.when, kind, r.do) : C.defaultMode(r));
   if (!C.MODES.includes(mode)) throw fail(where, `mode is ${C.MODES.join(', ')}`);
   if (mode === 'while' && ['up', 'tap', 'release'].includes(r.when)) throw fail(where, `mode "while" works with down, hold and press, not ${r.when}`);
   if (kind === 'axisDepth' && !['press', 'while', 'toggle'].includes(mode)) throw fail(where, 'an axis that follows the depth (from / to) takes mode press, while or toggle');
   if (C.ONCE.includes(kind) && !['tap', 'press'].includes(mode)) throw fail(where, `${kind} happens once: mode tap or press`);
-  return { trigger: t + 1, mode: C.MODES.indexOf(mode) + 1, tval, ...out };
+  const allowed = fresh && M.newModes(kind, r.do);
+  if (allowed && !allowed.includes(mode)) {
+    const what = kind === 'mode' ? `a mode ${r.do.action}` : kind;
+    throw fail(where, `${what} takes mode ${allowed.join(', ')}${kind === 'mode' ? ' (while only with action enter)' : ''}`);
+  }
+  const need = r.if === undefined ? null : M.parseIf(r.if, where, ctx, self);
+  return [{ trigger: t + 1, mode: C.MODES.indexOf(mode) + 1, tval, ...out, ...(need && { need }) }, ...(arg ? [arg] : []), ...(depth ? [depth] : [])];
 }
 
-// JSON -> wire record fields (no slot yet); throws 400 errors that name the field
-function parseSpec(spec) {
+// JSON -> wire record fields (no slot yet); throws 400 errors that name the field. ctx (from the
+// keyboard, custom-key-actions.js) resolves `if` keys to slots and mode names to ids: { slotOf, modeOf,
+// self (the key's slot) }; without it names stay names (enough to check and preview). Rules with
+// `if` carry need: { keys, on, off }; a mouse keys rule is followed by its ARG rule (and DEPTH rule).
+function parseSpec(spec, ctx) {
   if (!isObj(spec)) throw fail('', 'the map is { key | slot, press?, gap?, alsoType?, rules: [...] }');
   only(spec, ['key', 'slot', 'press', 'gap', 'alsoType', 'rules', 'summary'], '');
   if (spec.key === undefined && spec.slot === undefined) throw fail('', 'give key (like "W") or slot');
@@ -124,15 +138,31 @@ function parseSpec(spec) {
   if (spec.alsoType !== undefined && typeof spec.alsoType !== 'boolean') throw fail('', 'alsoType is true or false');
   if (!Array.isArray(spec.rules)) throw fail('', 'rules is a list (empty removes the map)');
   if (spec.rules.length > P.KA.MAX_RULES) throw fail('', `at most ${P.KA.MAX_RULES} rules per key, not ${spec.rules.length}`);
-  return {
+  const head = {
     press: cmm(spec.press ?? C.DEFAULTS.pressMm, 1, 400, 'press', ''),
     gap: cmm(spec.gap ?? C.DEFAULTS.gapMm, 1, 50, 'gap', ''),
     flags: spec.alsoType ? 1 : 0,
-    rules: spec.rules.map(rule),
   };
+  const self = ctx ? ctx.self : spec.key !== undefined ? M.LOOSE.slotOf(spec.key) : spec.slot;
+  const rules = spec.rules.flatMap((r, i) => rule(r, i, ctx ?? M.LOOSE, self));
+  if (rules.length > P.KA.MAX_RULES) {
+    throw fail('', `the rules take ${rules.length} of the key's ${P.KA.MAX_RULES} rule slots (a mouseKeys rule takes 2, 3 with speedBy pressure or both)`);
+  }
+  return { ...head, rules };
 }
 
-const toRecord = (wire, slot) => P.encodeKaRecord({ ...wire, slot });
+// true when a parsed map needs engine 2 (conditions, modes, mouse keys)
+const usesModes = (wire) => wire.rules.some((x) => x.need || x.cond || x.output === M.OUT.MODE || x.output === M.OUT.MOUSE_KEYS || x.trigger === P.KA.ARG);
+
+// wire -> 56 bytes; condIndex(entry) -> 1..15 for rules with a condition (needs resolved slots / ids)
+function toRecord(wire, slot, condIndex) {
+  const rules = wire.rules.map(({ need, ...x }) => {
+    if (!need) return x;
+    if (!condIndex) throw new Error('a rule with a condition needs the condition table');
+    return { ...x, cond: condIndex(M.condEntry(need)) };
+  });
+  return P.encodeKaRecord({ ...wire, rules, slot });
+}
 
 function doOf(x) {
   switch (x.output) {
@@ -148,16 +178,26 @@ function doOf(x) {
   }
 }
 
-// record bytes (or decoded fields) -> JSON with the summary sentences
-function fromRecord(bytes, name) {
+// record bytes (or decoded / parsed fields) -> JSON with the summary sentences. ctx rebuilds `if`
+// and mode names: { conds: the 15 condition entries (entry n at [n - 1]), modeName(id), keyName(slot) };
+// without conds a rule's condition shows as if: { entry: n }.
+function fromRecord(bytes, name, ctx = {}) {
   const r = Array.isArray(bytes) ? P.decodeKaRecord(bytes) : bytes;
-  const rules = r.rules.map((x) => {
-    const when = C.TRIGGERS[x.trigger - 1] ?? `trigger ${x.trigger}`;
-    return { when, ...((when === 'down' || when === 'up') && { at: x.tval / 100 }), ...((when === 'hold' || when === 'tap') && { ms: x.tval }),
-      mode: C.MODES[x.mode - 1] ?? `mode ${x.mode}`, do: doOf(x) };
+  const rules = [];
+  const tails = new Set();   // ARG / DEPTH rules read with their mouse keys rule
+  r.rules.forEach((x, i) => {
+    if (tails.has(i)) return;
+    const when = C.TRIGGERS[x.trigger - 1] ?? (x.trigger === P.KA.ARG ? 'arg' : `trigger ${x.trigger}`);
+    const { arg, depth } = M.mkTail(r.rules, i);
+    if (arg) tails.add(i + 1);
+    if (depth) tails.add(i + 2);
+    const need = x.need ?? (x.cond ? M.needOf(ctx.conds?.[x.cond - 1]) : null);
+    const cond = need ? M.ifJson(need, ctx) : x.cond ? { entry: x.cond } : null;
+    rules.push({ when, ...((when === 'down' || when === 'up') && { at: x.tval / 100 }), ...((when === 'hold' || when === 'tap') && { ms: x.tval }),
+      mode: C.MODES[x.mode - 1] ?? `mode ${x.mode}`, ...(cond && { if: cond }), do: M.newDo(x, arg, ctx, depth) ?? doOf(x) });
   });
   const spec = { ...(name && { key: name }), slot: r.slot, press: (r.press || 30) / 100, gap: (r.gap || 10) / 100, alsoType: Boolean(r.flags & 1), rules };
-  return { ...spec, summary: C.summary(spec) };
+  return { ...spec, summary: M.summary(spec) };
 }
 
 // the stored form of a spec (rounded to wire steps, defaults filled), without the keyboard
@@ -169,4 +209,4 @@ function preview(spec) {
   return { ...(spec.key !== undefined && { key: spec.key }), ...(spec.slot !== undefined && { slot: spec.slot }), ...out };
 }
 
-module.exports = { parseSpec, toRecord, fromRecord, preview, fail };
+module.exports = { parseSpec, toRecord, fromRecord, preview, usesModes, fail };

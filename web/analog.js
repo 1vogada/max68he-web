@@ -31,7 +31,8 @@
   const slotOf = (el) => { for (const [s, e] of App.keyEls) if (e === el) return s; return undefined; };
   const tab = () => document.body.dataset.gp;
 
-  const wizard = () => tab() === 'wizard' && App.keyWizard;
+  // the Key wizard page (view 'wizard') shares the board hooks and the depth stream
+  const wizard = () => App.st.view === 'wizard' && App.keyWizard;
 
   function paint(slot, el) {
     if (wizard()) return App.keyWizard.paint(slot, el, depth.get(slot) ?? 0);
@@ -279,13 +280,11 @@
   }
 
   function showTab(t) {
-    if (tab() === 'wizard' && t !== 'wizard' && App.keyWizard && !App.keyWizard.canLeave()) return;
     document.body.dataset.gp = t;
     App.$$('#gp-tabs [data-gp-tab]').forEach((b) => b.classList.toggle('on', b.dataset.gpTab === t));
     if (t !== 'setup' && armed) { armed = null; drawPalette(); }
     if (t === 'tester' && App.st.view === 'analog') App.gpTester.start(); else App.gpTester.stop();
     if (t === 'config') redraw();
-    App.keyWizard?.shown(t === 'wizard' && App.st.view === 'analog');
     if (App.st.view === 'analog') App.paintKeys();
   }
 
@@ -345,10 +344,13 @@
     }).catch((e) => App.ui.showError(bind, `Could not read the gamepad mapping: ${e.message}`));
     // Streams (and the tester) run only while this page is open.
     window.addEventListener('pagechange', (e) => {
-      if (e.detail === 'analog') { startStreams(); showTab(tab()); } else { stopStreams(); App.gpTester.stop(); armed = null; App.keyWizard?.shown(false); }
+      if (e.detail === 'analog') { startStreams(); showTab(tab()); App.keyWizard?.shown(false); }
+      else if (e.detail === 'wizard') { startStreams(); App.gpTester.stop(); armed = null; App.keyWizard?.shown(true); App.paintKeys(); }
+      else { stopStreams(); App.gpTester.stop(); armed = null; App.keyWizard?.shown(false); }
     });
     window.addEventListener('themechange', () => cfg && redraw());
   }
 
   App.views.analog = { init, paint, keyDown, selection };
+  App.views.wizard = { paint, keyDown };
 })();

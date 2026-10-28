@@ -1,0 +1,12 @@
+/* Synth page (plugin) */
+.synth-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.synth-chord { font-size: 34px; font-weight: 700; letter-spacing: .02em; min-height: 42px; color: var(--accent); text-shadow: 0 0 18px color-mix(in srgb, var(--accent) 60%, transparent); }
+.synth-stage { position: relative; margin: 8px 0 14px; border-radius: 12px; overflow: hidden; background: #0a0a10; border: 1px solid var(--line); }
+.synth-stage canvas { display: block; width: 100%; height: 180px; }
+.synth-start { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 16px; padding: 12px 22px; }
+.synth-panel.live .synth-start { left: auto; right: 12px; top: 12px; transform: none; font-size: 13px; padding: 6px 12px; opacity: .85; }
+.synth-controls { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px 14px; align-items: end; }
+.synth-controls label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.synth-controls .synth-check { flex-direction: row; align-items: center; gap: 8px; grid-column: span 2; }
+body[data-view="synth"] .key { transition: background .06s linear; }
+@media (max-width: 600px) { .synth-chord { font-size: 26px; } .synth-controls .synth-check { grid-column: auto; } }

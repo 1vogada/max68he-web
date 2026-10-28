@@ -8,8 +8,11 @@
     "mcp": "node src/mcp.js",
     "web": "node src/web/server.js",
     "build:web": "node scripts/build-web.js",
+    "postinstall": "node scripts/vendor-blockly.js && node scripts/vendor-codemirror.js",
     "serve:web": "node scripts/serve-web.js",
-    "publish:public": "node scripts/publish-public.js"
+    "publish:public": "node scripts/publish-public.js",
+    "mouse-mode": "node src/cli.js key-actions tests/fixtures/ka-mouse-mode.json",
+    "ka-fixture": "node scripts/ka-fixture.js"
   },
   "keywords": [],
   "author": "",
@@ -17,6 +20,8 @@
   "type": "commonjs",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
+    "blockly": "^12.5.1",
+    "codemirror": "^5.65.21",
     "node-hid": "^3.4.0",
     "zod": "^4.6.7"
   },

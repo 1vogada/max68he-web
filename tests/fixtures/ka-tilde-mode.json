@@ -1,0 +1,12 @@
+{
+ "modes": [{ "id": 1, "name": "Mouse" }, { "id": 2, "name": "Tilde" }],
+ "maps": [
+  { "key": "B", "rules": [{ "when": "press", "if": { "held": ["Fn", "LCtrl"] }, "do": { "mode": "Tilde", "action": "toggle" } }] },
+  { "key": "Esc", "rules": [
+   { "when": "press", "if": { "mode": "Mouse" }, "do": { "mode": "Mouse", "action": "leave" } },
+   { "when": "tap", "ms": 3000, "if": { "mode": "Tilde", "notHeld": ["Fn"] }, "do": { "key": "`" } },
+   { "when": "hold", "ms": 3000, "if": { "mode": "Tilde", "notHeld": ["Fn"] }, "do": { "mode": "Tilde", "action": "leave" } },
+   { "when": "press", "if": { "mode": "Tilde", "held": ["Fn"] }, "do": { "key": "Esc" } }
+  ] }
+ ]
+}

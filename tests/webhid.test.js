@@ -157,6 +157,10 @@ test('the web build bundles: driver before the page scripts, no Node-only module
   assert.ok(js.includes('requestDevice'), 'the WebHID stand-in is in');
   assert.ok(fs.existsSync(path.join(out, 'plugins', 'games')), 'plugin files copied');
   assert.ok(fs.existsSync(path.join(out, 'THIRD_PARTY_NOTICES.md')), 'notices on the site');
+  // Blockly (Key wizard Blocks view) ships as its own files with its licence, loaded only when the view opens
+  for (const f of ['blockly_compressed.js', 'msg/en.js', 'media/sprites.svg', 'LICENSE.txt']) assert.ok(fs.existsSync(path.join(out, 'vendor', 'blockly', f)), `vendor/blockly/${f}`);
+  assert.ok(!html.includes('blockly_compressed'), 'Blockly is lazy-loaded, not in the page');
+  assert.match(fs.readFileSync(path.join(out, 'THIRD_PARTY_NOTICES.md'), 'utf8'), /blockly.*Apache License 2\.0/i);
   // flashing over WebHID is in; no firmware image is on the site unless a build asks for one
   assert.ok(build.inputs.some((i) => i.endsWith('src/ryflash.js')) && build.inputs.some((i) => i.endsWith('web-build/web-flash.js')));
   assert.deepStrictEqual(fs.readdirSync(path.join(out, 'firmware')), ['manifest.json'], 'no firmware hosted by default');

@@ -25,7 +25,7 @@ test('protocol: "keyActions" is CAPS2 bit 15; 0xEE INFO / GET / SET / LIST packe
   assert.deepStrictEqual(set.slice(8), r);
   assert.throws(() => P.kaGetPacket(128), /slot out of range/);
   assert.throws(() => P.kaSetPacket(1, [0]), /56 bytes/);
-  assert.deepStrictEqual(P.parseKaInfo([0xee, 0, 0, 0, 0, 0, 0, 0, 32, 6, 3, 56]), { entries: 32, maxRules: 6, used: 3, recordBytes: 56 });
+  assert.deepStrictEqual(P.parseKaInfo([0xee, 0, 0, 0, 0, 0, 0, 0, 32, 6, 3, 56]), { entries: 32, maxRules: 6, used: 3, recordBytes: 56, engine: 1, conditions: 0, modes: 0, activeModes: 0 });
 });
 
 test('record header: slot, n, gap, flags, press LE, defaults 0.30 mm / 0.10 mm', () => {
@@ -249,7 +249,7 @@ test('driver: set, get one, list (paged), remove, info; refusals', async () => {
   assert.strictEqual((await kb.getKeyActions(9)).key, 'A');
   assert.strictEqual(await kb.getKeyActions('S'), null);
   assert.deepStrictEqual((await kb.getKeyActions()).map((m) => m.key), ['A', 'W', 'D'], 'all three over two LIST pages');
-  assert.deepStrictEqual(await kb.keyActionsInfo(), { entries: 4, maxRules: 6, used: 3, recordBytes: 56 });
+  assert.deepStrictEqual(await kb.keyActionsInfo(), { entries: 4, maxRules: 6, used: 3, recordBytes: 56, engine: 1, conditions: 0, modes: 0, activeModes: 0 });
   assert.deepStrictEqual(await kb.removeKeyActions('W'), { key: 'W', slot: 14, removed: true });
   assert.ok(!table.has(14));
   await kb.setKeyActions({ key: 'S', rules: [{ when: 'press', do: { gamepad: 'A' } }] });

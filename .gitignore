@@ -5,3 +5,5 @@ config/backups/
 config/profiles.json
 config/profiles/
 site/
+web/vendor/
+config/key-blocks.json

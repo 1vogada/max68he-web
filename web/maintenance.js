@@ -157,4 +157,5 @@
   App.views.maintenance = { init };
   window.addEventListener('pagechange', selection);
   App.maintenanceSelection = selection;
+  App.loadFirmwareImages = loadImages;   // the firmware builder (fw-builder.js) lists its new image
 })();

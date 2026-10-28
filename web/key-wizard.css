@@ -1,5 +1,4 @@
-/* Key wizard (Gamepad page, 4th tab): web/key-wizard.js. Uses the theme tokens of style.css. */
-body:not([data-gp="wizard"]) [data-gp="wizard"] { display: none !important; }
+/* Key wizard (its own page, view "wizard"): web/key-wizard.js. Uses the theme tokens of style.css. */
 #kw-panel > .savebar { display: none; }        /* Save lives on the summary step */
 
 .kw-steps { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 0; padding: 0; }
@@ -59,3 +58,25 @@ body:not([data-gp="wizard"]) [data-gp="wizard"] { display: none !important; }
   border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
 .kw-maps li.on { border-color: var(--accent); }
 @media (max-width: 640px) { .kw-maps li { grid-template-columns: 1fr; } }
+.gp-wizard-link { margin: 0 0 8px; }
+.gp-wizard-link .link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; text-decoration: underline; font: inherit; }
+
+/* Wizard | Blocks | Modes | Code tabs (web/key-blocks.js; Code: kb-code.css): panels carry data-kw-tab */
+body[data-view="wizard"][data-kw="wizard"] [data-kw-tab]:not([data-kw-tab~="wizard"]),
+body[data-view="wizard"][data-kw="blocks"] [data-kw-tab]:not([data-kw-tab~="blocks"]),
+body[data-view="wizard"][data-kw="modes"] [data-kw-tab]:not([data-kw-tab~="modes"]),
+body[data-view="wizard"][data-kw="code"] [data-kw-tab]:not([data-kw-tab~="code"]) { display: none !important; }
+.kb-ws { height: min(70vh, 640px); min-height: 380px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin: 8px 0; }
+.kb-note { margin: 6px 0; padding: 8px 10px; border-radius: 8px; background: var(--accent-soft); font-size: 13px; }
+.kb-warn { margin: 6px 0; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--danger); color: var(--danger); font-size: 13px; }
+.kb-slots { display: flex; flex-wrap: wrap; gap: 6px; }
+.kb-slots .kb-over { border-color: var(--danger); color: var(--danger); }
+.kb-modes { display: grid; gap: 8px; margin: 10px 0; }
+.kb-mode { display: grid; grid-template-columns: auto minmax(120px, 1fr) auto auto auto; gap: 10px; align-items: center;
+  padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
+.kb-mode.unused { opacity: .7; }
+.kb-mode .chip.on { border-color: var(--accent); color: var(--accent); }
+.kb-mode-id { font-weight: 600; font-size: 13px; }
+.kb-summary h3 { margin: 10px 0 4px; }
+.kb-summary ul { margin: 0 0 6px; padding-left: 20px; font-size: 13px; }
+@media (max-width: 700px) { .kb-mode { grid-template-columns: 1fr 1fr; } }

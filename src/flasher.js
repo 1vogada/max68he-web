@@ -45,6 +45,12 @@ function listImages() {
     info('stock', 'Stock firmware (restore)', path.join(fw, 'stock', '2755', 'fw_at32.bin'),
       'Back to the Attack Shark firmware. Open-firmware features go away and settings may reset: export a profile first, then set actuation and calibrate in the Attack Shark app.', false),
   ];
+  // the firmware builder's images (fw-builder.js: build/custom-<key>, registered after the preflight)
+  for (const b of require('./fw-builder').registered(fw)) {
+    const off = Object.entries(b.flags ?? {}).filter(([, on]) => !on).length;
+    out.push(info(b.id, b.label, b.file, `Built here from firmware ${b.stamp ?? '(unknown commit)'}${off ? ` with ${off} feature${off > 1 ? 's' : ''} left out` : ''}. `
+      + 'Your settings are kept; the app hides what this build leaves out.', true));
+  }
   const prev = path.join(fw, 'firmware', 'build', 'previous');
   try {
     for (const f of fs.readdirSync(prev).filter((x) => x.endsWith('.bin')).sort().reverse())
@@ -183,7 +189,9 @@ async function flash(id, prepare = async () => {}, runner = run,
         if (c.res?.mode === 'recover' && c.res.post_dev_id != null && c.res.post_dev_id !== 2755)
           say(`Warning: flashed from updater mode without a model check, and the keyboard now reports model ${c.res.post_dev_id}, not 2755.`);
         say('Done: the keyboard is back with the new firmware.');
-        if (!stock && kept.maps?.length) await restoreKeyMaps(open, kept.maps, job.keyMaps, { say, tries: reopenTries, waitMs: reopenMs });
+        if (!stock && (kept.maps?.length || kept.table?.modeNames?.some(Boolean))) {
+          await restoreKeyMaps(open, kept.maps, job.keyMaps, { say, tries: reopenTries, waitMs: reopenMs, table: kept.table });
+        }
         return job;
       }
       if (c.kind === 'broken') return writeFailed(c.message);

@@ -5,6 +5,17 @@
   {
    "board": 2755,
    "model": "MAX68HE",
+   "file": "x68max-2755-22d9af2.bin",
+   "commit": "22d9af2209d1ea4742d50eea8150ed67625b4f4c",
+   "committedAt": "2026-10-28T13:04:04+01:00",
+   "builtAt": "2026-10-28T12:30:33.007Z",
+   "size": 114872,
+   "sha256": "c68ab09c02e8d9fb4cb7e99d6aabc0011d97de1a02e91eed141ef801bc7768eb",
+   "notes": "Merge features-all: 31 switchable firmware features with measured flash / RAM cost; key-not-held conditions (engine 5); release rules fire after a mode change"
+  },
+  {
+   "board": 2755,
+   "model": "MAX68HE",
    "file": "x68max-2755-f17f883.bin",
    "commit": "f17f8832628f803e25820203f7b1e6b9f423415e",
    "committedAt": "2026-10-27T15:51:04+01:00",

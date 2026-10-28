@@ -479,7 +479,8 @@ server.registerTool('get_key_depths', {
   return depth.map((mm, slot) => ({ slot, key: names[slot] ?? null, mm })).filter((d) => d.mm > 0 || d.key);
 }));
 
-require('./mcp-key-actions').registerKeyActionTools({ server, z, tool, OPEN_FW });   // get_key_actions, set_key_actions
+require('./mcp-key-actions').registerKeyActionTools({ server, z, tool, OPEN_FW });   // get_key_actions, set_key_actions, get_modes, set_mode_name
+require('./mcp-kbcode').registerKbcodeTools({ server, z, conn });   // run_kb_code, get_kb_code_docs
 
 // optional features (plugins/<name>/) add their own tools
 for (const p of require('./plugins').loadPlugins()) p.mcp?.({ server, z, tool, OPEN_FW });

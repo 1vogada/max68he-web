@@ -73,11 +73,19 @@ function offerPick(kind) {
   $('#wf-pick-why').textContent = why;
   const present = () => (kind === 'updater' ? updater().bootPresent() : updater().normalPresent());
   $('#wf-pick').hidden = present();
+  let picked = false;
   $('#wf-pick-btn').onclick = async () => {
+    picked = true;
     try { await hid.request(undefined, kind === 'updater' ? hid.UPDATER_FILTERS : hid.FILTERS); } catch (e) { if (e.name !== 'NotFoundError') say(e.message); }
     $('#wf-pick').hidden = present();
   };
-  const timer = setInterval(() => { if (present() || !running) { $('#wf-pick').hidden = true; clearInterval(timer); } }, 500);
+  const timer = setInterval(() => {
+    if (!present() && running) return;
+    // worth knowing: does the browser hand the device back by itself, or does it need the pick?
+    if (present()) say(`The ${kind} showed up ${picked ? 'after you picked it' : 'by itself'}.`);
+    $('#wf-pick').hidden = true;
+    clearInterval(timer);
+  }, 500);
 }
 
 function refresh() {

@@ -37,6 +37,10 @@ const HELP = `usage: max68he <command> [args]
                                scan rate and timing (open firmware); flags tune it live
   export <file.json>           back up the active profile
   import <file.json>           restore a backup into the active profile
+  key-actions <file.json>      write key action maps: { maps, remove?, modes? } (e.g. tests/fixtures/ka-mouse-mode.json)
+  modes                        key action modes 1..3: names and which are active
+  kbcode <file.js> [--apply]   run a kbcode script (docs/KBCODE.md): check it and list every change
+                               against the keyboard (works without one); --apply writes them
   json <command>               same output as JSON (info, keys, switches, lighting)`;
 
 function parseFlags(args) {
@@ -119,6 +123,7 @@ async function run(argv) {
   if (asJson) [cmd, ...rest] = rest;
   if (!cmd || cmd === 'help' || cmd === '--help') return console.log(HELP);
 
+  if (cmd === 'kbcode') return kbcodeCommand(rest, asJson);
   const kb = await Keyboard.open();
   const out = (data, pretty) => (asJson ? console.log(JSON.stringify(data, null, 2)) : pretty(data));
   try {
@@ -238,11 +243,45 @@ async function run(argv) {
         return console.log(`
 restored (${r.keyWrites} keys changed)`);
       }
+      case 'key-actions': {
+        if (!rest[0]) throw new Error('key-actions needs a .json file: { maps, remove?, modes? }');
+        const r = await kb.setKeyActionsBatch(JSON.parse(require('fs').readFileSync(rest[0], 'utf8')));
+        for (const m of r.maps) console.log(`${m.key ?? `slot ${m.slot}`}: ${m.removed ? 'map removed' : m.summary.join(' / ')}`);
+        for (const m of r.removed) console.log(`${m.key ?? `slot ${m.slot}`}: map removed`);
+        return r.modes && console.log(`modes: ${r.modes.map((x) => `${x.id} ${x.name || '(unnamed)'}`).join(', ')}`);
+      }
+      case 'modes':
+        return out(await kb.getModes(), (d) => d.forEach((m) => console.log(`${m.id} ${m.name || '(unnamed)'}${m.active ? ' (active)' : ''}`)));
       default:
         throw new Error(`unknown command ${cmd}\n\n${HELP}`);
     }
   } finally {
     kb.close();
+  }
+}
+
+// kbcode <file> [--apply]: a dry run needs no keyboard (it then says nothing was compared)
+async function kbcodeCommand(rest, asJson) {
+  const file = rest.find((a) => !a.startsWith('--'));
+  if (!file) throw new Error('kbcode needs a script file: kbcode <file.js> [--apply]');
+  const code = require('fs').readFileSync(file, 'utf8');
+  const apply = rest.includes('--apply');
+  const kbcode = require('./kbcode');
+  let kb = null, why;
+  try { kb = await Keyboard.open(); } catch (e) { if (apply) throw e; why = e.message; }
+  try {
+    const r = apply ? await kbcode.apply(kb, code, { onStep: (s) => !asJson && console.log(`  writing ${s}`) })
+      : await kbcode.check(code, { keyboard: kb, noKeyboard: why });
+    if (asJson) console.log(JSON.stringify(r, null, 2));
+    else {
+      for (const l of r.logs ?? []) console.log(`log (line ${l.line}): ${l.text}`);
+      for (const e of kbcode.errorLines(r.errors)) console.log(`${file}: ${e}`);
+      for (const line of (apply ? r.applied : r.summary) ?? []) console.log(`- ${line}`);
+      if (r.ok && !apply) console.log(r.compared ? `${r.changes} change${r.changes === 1 ? '' : 's'}; run with --apply to write them` : 'not compared with a keyboard');
+    }
+    if (!r.ok) process.exitCode = 1;
+  } finally {
+    kb?.close();
   }
 }
 

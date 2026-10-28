@@ -372,13 +372,15 @@ const OPEN_LIGHT_MODES = {
   0x51: 'Impact', 0x52: 'Sparks', 0x53: 'Lightning', 0x54: 'Gravity', 0x55: 'Squeeze',
   0x56: 'Actuation trainer', 0x57: 'WASD gauge', 0x58: 'Spotlight', 0x59: 'Pressure paint',
 };
-// which open modes a board offers: base ones always, fx.c with 'fxEffects', pfx.c with host API 3+
+// which open modes a board offers: base ones always (Droplet unless a custom build left it out),
+// fx.c with 'fxEffects', pfx.c with host API 3+ (and 'pressureFx' once CAPS has its third word)
 function openModesFor(caps) {
   const feats = caps?.features ?? [];
   return Object.fromEntries(Object.entries(OPEN_LIGHT_MODES).filter(([k]) => {
     const m = Number(k);
+    if (m === CUSTOM_MODE.droplet && caps) return feats.includes('droplet');
     if (BASE_OPEN_LIGHT_MODES.includes(m)) return true;
-    if (m >= 0x4c) return (caps?.api ?? 0) >= 3;
+    if (m >= 0x4c) return (caps?.api ?? 0) >= 3 && (!caps.caps3 || feats.includes('pressureFx'));
     return feats.includes('fxEffects');
   }));
 }
@@ -567,10 +569,29 @@ function hostPacket(op, header = [], data = []) {
 const HOST_CAPS2 = ['games', 'dksLevels', 'fnLayers', 'textKeys', 'calibration', 'perfMode', 'sectionTime', 'textTyping',
   'gamepadPlus', 'compatMode', 'releaseDebounce', 'idleDim', 'resetFe', 'sequence', 'sequenceGlide', 'keyActions'];
 
+// third word (CAPS [10..11], firmware feature builder): bit 15 = the word is there (older firmware
+// leaves it 0, so nothing in it can be read as "left out")
+// bits 2..13 are the switchable firmware features (features.json caps); bit 14 says they follow
+// the build (without it, older firmware, they are not reported)
+const HOST_CAPS3 = ['pressureFx', 'memReport', 'dks', 'advKeys', 'kaModes', 'mouseKeys', 'mouseKeysPressure',
+  'analogMouse', null, null, null, 'scanTiming', 'pressCounters', 'userLayers', 'buildBits'];
+const CAPS3_BUILD = 0x4000;
+// caps 'memReport': CAPS reply [12..35] = six u32 LE, how much of the keyboard the running image
+// uses (firmware host_api.h host_mem_t). stackPeak 0 = not measured.
+const MEM_FIELDS = ['flashUsed', 'flashSize', 'ramStatic', 'ramReserved', 'ramSize', 'stackPeak'];
+function parseMemory(r) {
+  const u32 = (o) => ((r[o] ?? 0) | ((r[o + 1] ?? 0) << 8) | ((r[o + 2] ?? 0) << 16) | ((r[o + 3] ?? 0) << 24)) >>> 0;
+  return Object.fromEntries(MEM_FIELDS.map((f, i) => [f, u32(12 + i * 4)]));
+}
+const CAPS3_VALID = 0x8000;
+
 function parseCaps(r) {
-  const bits = r[6] | (r[7] << 8), bits2 = (r[8] ?? 0) | ((r[9] ?? 0) << 8);
-  return { api: r[1], keys: r[2], leds: r[3], cols: r[4], rows: r[5],
-    features: [...HOST_CAPS.filter((_, i) => bits & (1 << i)), ...HOST_CAPS2.filter((_, i) => bits2 & (1 << i))] };
+  const bits = r[6] | (r[7] << 8), bits2 = (r[8] ?? 0) | ((r[9] ?? 0) << 8), bits3 = (r[10] ?? 0) | ((r[11] ?? 0) << 8);
+  const caps3 = Boolean(bits3 & CAPS3_VALID);
+  return { api: r[1], keys: r[2], leds: r[3], cols: r[4], rows: r[5], ...(caps3 ? { caps3 } : {}),
+    features: [...HOST_CAPS.filter((_, i) => bits & (1 << i)), ...HOST_CAPS2.filter((_, i) => bits2 & (1 << i)),
+      ...(caps3 ? HOST_CAPS3.filter((f, i) => f && bits3 & (1 << i) && (i < 2 || bits3 & CAPS3_BUILD)) : [])],
+    ...(caps3 && (bits3 & 2) ? { memory: parseMemory(r) } : {}) };
 }
 
 // ---- on-board gamepad (open firmware 0xFD, gamepad.h) ----------------------
@@ -722,9 +743,19 @@ function parseSeqStatus(r) {
 // [EE, 2 SET, slot] + record -> [2] 0 ok / 2 table full / 3 bad rule ([3] rule index, 0xFF header) / 4 bad slot;
 // [EE, 3 LIST, start] -> [3] slots returned, [4] total in use, [8..] slots with maps (ascending).
 // Record (56): [0] slot [1] n [2] gap cmm [3] flags [4..5] press cmm LE [6..7] 0, then 6 rules of
-// 8 bytes: [trigger, mode, tval lo, tval hi, output, a, b, c].
-const KA = { OP: 0xee, INFO: 0, GET: 1, SET: 2, LIST: 3, RECORD: 56, MAX_RULES: 6, RULE: 8 };
-const KA_ERRORS = [null, 'the key has no map', 'the key action table is full', 'bad rule', 'bad slot'];
+// 8 bytes: [trigger | condition << 4, mode, tval lo, tval hi, output, a, b, c].
+// Engine 2 (INFO [12] >= 2, feature 'keyModes'): [13] condition entries, [14] modes, [15] active modes;
+// [EE, 4 COND_GET, idx] -> [3] idx, [8..11] entry; [EE, 5 COND_SET, idx] + entry -> 3 bad / 4 bad idx / 5 in use;
+// [EE, 6 MODE_GET, n] -> [3] n, [4] active mask, [8..23] name; [EE, 7 MODE_SET, n] + name -> 3 bad / 4 bad n.
+// Condition entry: [k0, k1, k2] slots held (0xFF unused), [3] modes on | modes off << 4.
+// Engine 3 (INFO [12] = 3): a mouse keys ARG rule's mode byte = keep ms / 10 (0..100), c bit 0 = shared
+// speed; engine 2 refuses a non-zero ARG mode / c. Engine 4 (INFO [12] = 4): ARG c bits 1..2 = speed by
+// (0 time, 1 pressure, 2 both; 3 refused), and with 1 / 2 a DEPTH rule right after the ARG:
+// [0x0F, 0, 0, 0, from, to, 0, 0] in 0.1 mm (0 <= from < to <= 40); engine 3 refuses those bits.
+const KA = { OP: 0xee, INFO: 0, GET: 1, SET: 2, LIST: 3, COND_GET: 4, COND_SET: 5, MODE_GET: 6, MODE_SET: 7,
+  RECORD: 56, MAX_RULES: 6, RULE: 8, CONDS: 15, MODES: 3, NAME: 16, ARG: 15 };
+const KA_ERRORS = [null, 'the key has no map', 'the key action table is full', 'bad rule', 'bad slot', 'in use'];
+const KA_COND_FREE = [0xff, 0xff, 0xff, 0];
 const kaSlot = (slot) => { checkSlot(slot); return slot; };
 const kaInfoPacket = () => hostPacket(KA.OP, [KA.INFO]);
 const kaGetPacket = (slot) => hostPacket(KA.OP, [KA.GET, kaSlot(slot)]);
@@ -738,7 +769,8 @@ function encodeKaRecord({ slot, gap = 0, flags = 0, press = 0, rules = [] }) {
   if (rules.length > KA.MAX_RULES) throw new Error(`at most ${KA.MAX_RULES} rules per key`);
   const r = new Array(KA.RECORD).fill(0);
   r.splice(0, 6, slot, rules.length, gap, flags, press & 0xff, (press >> 8) & 0xff);
-  rules.forEach((x, i) => r.splice(8 + i * KA.RULE, KA.RULE, x.trigger, x.mode, x.tval & 0xff, (x.tval >> 8) & 0xff,
+  rules.forEach((x, i) => r.splice(8 + i * KA.RULE, KA.RULE,
+    (x.trigger & 0x0f) | ((x.cond ?? 0) << 4), x.mode, x.tval & 0xff, (x.tval >> 8) & 0xff,
     x.output, x.a & 0xff, (x.b ?? 0) & 0xff, (x.c ?? 0) & 0xff));
   return r;
 }
@@ -747,10 +779,39 @@ function decodeKaRecord(b) {
   return { slot: b[0], gap: b[2], flags: b[3], press: b[4] | (b[5] << 8),
     rules: Array.from({ length: n }, (_, i) => {
       const o = 8 + i * KA.RULE;
-      return { trigger: b[o], mode: b[o + 1], tval: b[o + 2] | (b[o + 3] << 8), output: b[o + 4], a: b[o + 5], b: b[o + 6], c: b[o + 7] };
+      return { trigger: b[o] & 0x0f, cond: b[o] >> 4, mode: b[o + 1], tval: b[o + 2] | (b[o + 3] << 8), output: b[o + 4], a: b[o + 5], b: b[o + 6], c: b[o + 7] };
     }) };
 }
-const parseKaInfo = (r) => ({ entries: r[8], maxRules: r[9], used: r[10], recordBytes: r[11] });
+// engine 1 = the first key action engine (INFO [12] 0 / absent): no conditions, modes or mouse keys;
+// 2 / 3 as INFO [12] says (3: mouse keys can share speed)
+function parseKaInfo(r) {
+  const engine = r[12] >= 2 ? r[12] : 1;
+  return { entries: r[8], maxRules: r[9], used: r[10], recordBytes: r[11], engine,
+    conditions: engine >= 2 ? r[13] : 0, modes: engine >= 2 ? r[14] : 0, activeModes: engine >= 2 ? r[15] : 0 };
+}
+const kaIdx = (i, max, what) => { if (!Number.isInteger(i) || i < 1 || i > max) throw new Error(`${what} is 1..${max}`); return i; };
+const kaCondGetPacket = (idx) => hostPacket(KA.OP, [KA.COND_GET, kaIdx(idx, KA.CONDS, 'condition entry')]);
+function kaCondSetPacket(idx, entry) {
+  if (!Array.isArray(entry) || entry.length !== 4) throw new Error('a condition entry is 4 bytes');
+  return hostPacket(KA.OP, [KA.COND_SET, kaIdx(idx, KA.CONDS, 'condition entry')], entry);
+}
+const kaModeGetPacket = (n) => hostPacket(KA.OP, [KA.MODE_GET, kaIdx(n, KA.MODES, 'mode')]);
+// name: string (UTF-8, at most 16 bytes; '' = unnamed)
+function kaModeSetPacket(n, name) {
+  return hostPacket(KA.OP, [KA.MODE_SET, kaIdx(n, KA.MODES, 'mode')], encodeModeName(name));
+}
+function encodeModeName(name) {
+  const b = [...new TextEncoder().encode(String(name))];
+  if (b.length > KA.NAME) throw new Error(`a mode name is at most ${KA.NAME} bytes (UTF-8)`);
+  if (b.includes(0)) throw new Error('a mode name has no NUL characters');
+  return [...b, ...new Array(KA.NAME - b.length).fill(0)];
+}
+function decodeModeName(bytes) {
+  const end = bytes.indexOf(0);
+  return new TextDecoder().decode(Uint8Array.from(end < 0 ? bytes : bytes.slice(0, end)));
+}
+const parseKaCond = (r) => ({ idx: r[3], entry: r.slice(8, 12) });
+const parseKaMode = (r) => ({ id: r[3], active: r[4], name: decodeModeName(r.slice(8, 8 + KA.NAME)) });
 
 // Travel stream input report: [5, 0x1B, lo, hi, slot], report ID optional.
 function parseTravel(data) {
@@ -767,11 +828,12 @@ module.exports = {
   CUSTOM_MODE, customModePacket, liveFramePackets, OPEN_LIGHT_MODES, BASE_OPEN_LIGHT_MODES, openModesFor,
   FN_LAYERS, fnLayerGetPacket, fnLayerPackets, TEXT_COUNT, TEXT_MAX_LEN, TEXT_PAGES, textGetPacket, textPackets,
   SNAP_MODES, UNICODE_MODES, TEXT_TYPING_MODES, RELEASE_DEBOUNCE_MAX, DIM_DEFAULT_PERCENT, parseFwOptions, fwOptionsPacket, fwOptionsGetPacket, fwFactoryResetPacket, pressCountPacket, pressResetPacket, scanStatsPacket, scanTunePacket, parseScanStats, LAYER_PAGES, layerGetPacket, layerPackets,
-  HOST, HOST_CAPS, hostPacket, parseCaps, claimPackets, releaseAllPacket, injectPacket, overlayPackets,
+  HOST, HOST_CAPS, hostPacket, parseCaps, parseMemory, claimPackets, releaseAllPacket, injectPacket, overlayPackets,
   GAMEPAD_TARGETS, GAMEPAD_CURVES, gamepadGetPacket, gamepadSetPacket, parseGamepad, gamepadBindPackets, gamepadGetBindPacket,
   clearOverlayPacket, parseKeyEvent,
   SEQ, SEQ_EVENTS, seqPacket, seqPlayPacket, seqAppendPackets, parseSeqStatus,
   KA, KA_ERRORS, kaInfoPacket, kaGetPacket, kaSetPacket, kaListPacket, encodeKaRecord, decodeKaRecord, parseKaInfo,
+  KA_COND_FREE, kaCondGetPacket, kaCondSetPacket, kaModeGetPacket, kaModeSetPacket, encodeModeName, decodeModeName, parseKaCond, parseKaMode,
   KIND, NO_PARTNER, dksActionByte, dksCells, dksActionsPacket,
   DKS_ACTIONS, DKS_MAX_LEVELS, DKS_MIN_MM, DKS_MAX_MM, dksReadPacket, dksWritePacket, parseDks, parseOptions, optionsPacket,
 };

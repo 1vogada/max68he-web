@@ -1,0 +1,13 @@
+{
+ "modes": [{ "id": 1, "name": "Mouse" }],
+ "maps": [
+  { "key": "M", "rules": [{ "when": "hold", "ms": 3000, "if": { "held": ["Fn", "LCtrl"] }, "do": { "mode": "Mouse", "action": "enter" } }] },
+  { "key": "RShift", "rules": [{ "when": "press", "if": { "mode": "Mouse" }, "do": { "mouse": "L" } }] },
+  { "key": "PgDn", "rules": [{ "when": "press", "if": { "mode": "Mouse" }, "do": { "mouse": "R" } }] },
+  { "key": "Up", "rules": [{ "when": "press", "mode": "while", "if": { "mode": "Mouse" }, "do": { "mouseKeys": "up", "shareSpeed": true, "keepMs": 150, "speedBy": "pressure" } }] },
+  { "key": "Down", "rules": [{ "when": "press", "mode": "while", "if": { "mode": "Mouse" }, "do": { "mouseKeys": "down", "shareSpeed": true, "keepMs": 150, "speedBy": "pressure" } }] },
+  { "key": "Left", "rules": [{ "when": "press", "mode": "while", "if": { "mode": "Mouse" }, "do": { "mouseKeys": "left", "shareSpeed": true, "keepMs": 150, "speedBy": "pressure" } }] },
+  { "key": "Right", "rules": [{ "when": "press", "mode": "while", "if": { "mode": "Mouse" }, "do": { "mouseKeys": "right", "shareSpeed": true, "keepMs": 150, "speedBy": "pressure" } }] },
+  { "key": "Esc", "rules": [{ "when": "press", "if": { "mode": "Mouse" }, "do": { "mode": "Mouse", "action": "leave" } }] }
+ ]
+}

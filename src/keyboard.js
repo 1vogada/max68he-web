@@ -396,6 +396,7 @@ class Keyboard {
   }
 }
 
-Object.assign(Keyboard.prototype, require('./advanced'), require('./backup'), require('./custom'), require('./calibration'));
+Object.assign(Keyboard.prototype, require('./advanced'), require('./backup'), require('./custom'), require('./custom-key-actions'),
+  require('./calibration'));
 
 module.exports = { Keyboard, BOARD_ID };

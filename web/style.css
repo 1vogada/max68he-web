@@ -371,6 +371,7 @@ body[data-view="paint"] [data-views]:not([data-views~="paint"]),
 body[data-view="settings"] [data-views]:not([data-views~="settings"]),
 body[data-view="advanced"] [data-views]:not([data-views~="advanced"]),
 body[data-view="analog"] [data-views]:not([data-views~="analog"]),
+body[data-view="wizard"] [data-views]:not([data-views~="wizard"]),
 body[data-view="stats"] [data-views]:not([data-views~="stats"]),
 body[data-view="layers"] [data-views]:not([data-views~="layers"]),
 body[data-view="texts"] [data-views]:not([data-views~="texts"]),
@@ -561,3 +562,44 @@ button.danger:disabled { opacity: .5; cursor: not-allowed; }
 .seq-key-y::before { border-top-style: dashed; }
 #seq-preview-msg:empty { display: none; }
 #seq-preview-msg.seq-error { color: var(--danger); }
+/* firmware builder (fw-builder.js): features, flash / RAM bars */
+.panel label.fwb-feat { align-items: flex-start; }
+.fwb-feat .switch { flex: none; margin-top: 2px; }
+.fwb-text { line-height: 1.4; }
+.fwb-head { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 13px; margin-bottom: 4px; }
+.fwb-num { color: var(--muted); font-variant-numeric: tabular-nums; }
+.fwb-bar { height: 10px; border-radius: 99px; background: var(--surface-2); border: 1px solid var(--line); overflow: hidden; }
+.fwb-bar span { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+.fwb-meter[data-level=warn] .fwb-bar span { background: var(--warn); }
+.fwb-meter[data-level=over] .fwb-bar span { background: var(--danger); }
+.fwb-meter[data-level=warn] .fwb-num, .fwb-meter[data-level=over] .fwb-num { color: var(--text); }
+#fwb-panel { min-width: 0; }
+#fwb-log { overflow-wrap: anywhere; }   /* make lines carry long paths */
+@media (prefers-reduced-motion: reduce) { .fwb-bar span { transition: none; } }
+/* Features page (features.js) */
+.feat-bars { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; }
+.feat-bars h3, .feat-group h3 { font-size: 13px; font-weight: 600; margin: 0 0 8px; color: var(--muted); }
+.feat-bars .fwb-meter { margin-bottom: 10px; }
+.feat-bars .fwb-bar { height: 14px; }
+.feat-group { display: grid; gap: 10px; margin: 0 0 16px; }
+.feat-top { display: flex; gap: 10px; justify-content: space-between; flex-wrap: wrap; }
+.feat-cost { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.feat-desc, .feat-rel { display: block; }
+.feat-row.off b { color: var(--muted); }
+#feat-warn { display: grid; gap: 4px; margin: 0 0 12px; }
+#feat-dep { margin: 0 0 12px; }
+#feat-always ul { margin: 6px 0 0; padding-left: 18px; }
+
+/* memory bar under the keyboard name (mem-bar.js); colours as the firmware builder's bars */
+.mem-bar { display: grid; gap: 3px; margin-top: 6px; font-size: 11px; color: var(--muted); cursor: default; }
+.mem-row { display: grid; grid-template-columns: 6.5em 1fr; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+.mem-track { height: 5px; border-radius: 99px; background: var(--surface-2); border: 1px solid var(--line); overflow: hidden; }
+.mem-track span { display: block; height: 100%; background: var(--accent); }
+.mem-row[data-level=warn] .mem-track span { background: var(--warn); }
+.mem-row[data-level=over] .mem-track span { background: var(--danger); }
+.mem-row[data-level=warn], .mem-row[data-level=over] { color: var(--text); }
+.mem-unknown { display: inline-grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--line); font-size: 10px; }
+
+/* features sort */
+.feat-tools { gap: 10px; align-items: center; margin: 4px 0 12px; flex-wrap: wrap; }
+#feat-filter { min-width: 180px; }

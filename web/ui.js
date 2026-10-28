@@ -11,7 +11,8 @@
 
   const trackers = new Set();
 
-  ui.track = (panel, { save, discard, saveLabel = 'Save', note = '' }) => {
+  // cleanText / savedText: for a panel that keeps its edits elsewhere (the Code tab's draft on this PC)
+  ui.track = (panel, { save, discard, saveLabel = 'Save', note = '', cleanText = 'Matches the keyboard', savedText = 'Saved to the keyboard' }) => {
     const bar = document.createElement('div');
     bar.className = 'savebar';
     bar.innerHTML = `<span class="savebar-state" aria-live="polite"><span class="dot"></span><span class="txt"></span></span>
@@ -22,7 +23,7 @@
     const t = { panel, dirty: false, ready: true, why: '' };
     const sync = () => {
       panel.classList.toggle('is-dirty', t.dirty);
-      q('.txt', bar).textContent = t.dirty ? 'Unsaved changes' : 'Matches the keyboard';
+      q('.txt', bar).textContent = t.dirty ? 'Unsaved changes' : cleanText;
       q('.savebar-note', bar).textContent = t.dirty ? note : t.why;
       q('.save', bar).disabled = !t.dirty || !t.ready;
       q('.discard', bar).disabled = !t.dirty;
@@ -32,7 +33,7 @@
     // ready = false: nothing to save to yet (no key selected); why says what to do
     t.setReady = (ready, why = '') => { t.ready = ready; t.why = ready ? '' : why; sync(); };
     t.discard = () => { discard?.(); t.clear(); };
-    t.save = () => App.busy(panel, 'Saving…', async () => { await save(); t.clear(); App.toast('Saved to the keyboard'); });
+    t.save = () => App.busy(panel, 'Saving…', async () => { await save(); t.clear(); App.toast(savedText); });
     q('.save', bar).onclick = t.save;
     q('.discard', bar).onclick = t.discard;
     const touched = (e) => { if (!e.target.closest('[data-nodirty]') && e.target.closest('input, select, textarea')) t.mark(); };

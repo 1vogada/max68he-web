@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="key-wizard.css">
+  <link rel="stylesheet" href="kb-code.css">
 </head>
 <body>
   <aside class="sidebar">
@@ -17,6 +18,7 @@
         <strong id="model-name">MAX68HE</strong>
         <span id="board" class="muted">connecting…</span>
         <select id="kb-pick" aria-label="Keyboard" hidden></select>
+        <div id="mem-bar" class="mem-bar" hidden></div>
       </div>
     </div>
     <nav aria-label="Pages">
@@ -33,6 +35,7 @@
       <button data-view="keymap" data-also="fn layers"><span class="ico">⌨</span>Remap</button>
       <button data-view="fn" data-sub hidden>Fn layer</button>
       <button data-view="layers" data-sub data-open-fw hidden>Layers</button>
+      <button data-view="wizard"><span class="ico">✎</span>Key wizard</button>
       <button data-view="advanced" data-also="macros texts"><span class="ico">⧉</span>Advanced keys</button>
       <button data-view="macros" data-sub hidden>Macros</button>
       <button data-view="texts" data-sub hidden>Text keys</button>
@@ -65,7 +68,9 @@
         <div class="seg-tabs view-tabs" data-views="advanced macros texts" role="group" aria-label="Advanced keys">
           <button type="button" data-goto="advanced">Advanced keys</button><button type="button" data-goto="macros">Macros</button><button type="button" data-goto="texts">Text keys</button></div>
         <div class="seg-tabs view-tabs" id="gp-tabs" data-views="analog" role="group" aria-label="Gamepad">
-          <button type="button" data-gp-tab="setup" class="on">Setup &amp; remap</button><button type="button" data-gp-tab="config">Configuration</button><button type="button" data-gp-tab="tester">Gamepad tester</button><button type="button" data-gp-tab="wizard">Key wizard</button></div>
+          <button type="button" data-gp-tab="setup" class="on">Setup &amp; remap</button><button type="button" data-gp-tab="config">Configuration</button><button type="button" data-gp-tab="tester">Gamepad tester</button></div>
+        <div class="seg-tabs view-tabs" id="kw-style" data-views="wizard" role="group" aria-label="Key wizard">
+          <button type="button" data-kw="wizard" class="on">Wizard</button><button type="button" data-kw="blocks">Blocks</button><button type="button" data-kw="modes">Modes</button><button type="button" data-kw="code">Code</button></div>
         <div class="layer-list" id="layer-list" data-views="keymap fn layers" role="group" aria-label="Layers"></div>
         <div class="picks" data-views="actuation rt" role="group" aria-label="Quick select">
           <span class="muted small">Select</span>
@@ -199,6 +204,7 @@
         <ul class="aa-list"></ul>
       </section>
 
+      <p class="muted small gp-wizard-link" data-views="analog">Set up keys with depth / hold rules → <button type="button" class="link" data-goto="wizard">Key wizard</button></p>
       <section class="panel wide" id="gp-palette" data-views="analog" data-gp="setup">
         <h2>Controller mapping <span class="chip" id="gp-count">0 keys</span></h2>
         <p class="muted small">Pick a button, then click keys on the board to give it to them (or drag it onto a key).
@@ -210,7 +216,7 @@
         </div>
       </section>
 
-      <section class="panel wide kw" id="kw-panel" data-views="analog" data-gp="wizard">
+      <section class="panel wide kw" id="kw-panel" data-views="wizard" data-kw-tab="wizard">
         <h2>Key wizard <span class="chip" id="kw-key">no key yet</span></h2>
         <div id="kw-gate"></div>
         <ol class="kw-steps" id="kw-steps" aria-label="Wizard steps"></ol>
@@ -223,11 +229,62 @@
         </div>
       </section>
 
-      <section class="panel wide" id="kw-list" data-views="analog" data-gp="wizard">
+      <section class="panel wide" id="kw-list" data-views="wizard" data-kw-tab="wizard">
         <h2>Keys with action maps <span class="chip" id="kw-count">0</span></h2>
         <div id="kw-list-gate"></div>
         <p class="muted small" id="kw-empty">No key has an action map yet.</p>
         <ul class="kw-maps" id="kw-maps"></ul>
+      </section>
+
+      <section class="panel wide kb" id="kb-panel" data-views="wizard" data-kw-tab="blocks">
+        <h2>Blocks <span class="row"><span class="chip" id="kb-count">0 rules</span>
+          <button type="button" id="kb-rebuild" data-nodirty title="Throw these blocks away and rebuild them from the rules on the keyboard">Rebuild from the keyboard</button></span></h2>
+        <div id="kb-gate"></div>
+        <p class="muted small" id="kb-status">Loading the blocks…</p>
+        <p class="kb-note" id="kb-drift" hidden>The keyboard's rules were changed elsewhere (the Wizard tab or an AI tool) since these blocks were saved. Saving these blocks replaces them; "Rebuild from the keyboard" shows what is on the keyboard now.</p>
+        <p class="kb-note" id="kb-arm" hidden></p>
+        <div class="kb-ws" id="kb-ws" data-nodirty aria-label="Blocks workspace: drag blocks from the categories on the left"></div>
+        <p class="kb-warn" id="kb-warn" role="alert" hidden></p>
+        <div class="kb-slots" id="kb-slots" data-nodirty></div>
+      </section>
+
+      <section class="panel wide" id="kb-modes" data-views="wizard" data-kw-tab="modes">
+        <h2>Modes <span class="chip">up to 3</span></h2>
+        <p class="muted small">A mode is a state the keyboard is in, like "Mouse": blocks can turn it on and off, and blocks inside
+          "while in mode" or "in mode … acts as" work only while it is on. Each mode uses one of the extra layers (Layer 1-3).
+          Modes switch off when you unplug the keyboard, change profile, start a game or calibrate, and always with Fn + Esc held 2 s.
+          Changes here are saved with "Save all to the keyboard" on the Blocks tab.</p>
+        <div class="kb-modes" id="kb-modes-list" data-nodirty></div>
+        <div class="row-buttons" data-nodirty><button type="button" id="kb-make-mode">Make a mode</button></div>
+      </section>
+
+      <section class="panel wide kc" id="kc-panel" data-views="wizard" data-kw-tab="code">
+        <h2>Code <span class="chip" id="kc-count">not checked</span></h2>
+        <div class="kc-tools" data-nodirty>
+          <select id="kc-examples" data-nodirty aria-label="Examples"><option value="">Examples…</option></select>
+          <button type="button" id="kc-from-blocks" data-nodirty title="Start a script from the key action maps on the keyboard (what the Blocks and Wizard tabs made)">From Blocks</button>
+          <button type="button" id="kc-docs-btn" data-nodirty aria-expanded="false" aria-controls="kc-docs">Docs</button></div>
+        <p class="muted small" id="kc-status">Loading the editor…</p>
+        <div class="kc-body">
+          <div class="kc-main">
+            <div class="kc-editor" id="kc-editor" data-nodirty aria-label="Script editor"></div>
+            <div class="kc-actions" data-nodirty>
+              <button type="button" id="kc-check" title="Ctrl+Enter">Check</button>
+              <button type="button" id="kc-apply" class="primary" disabled>Apply to the keyboard</button>
+              <span class="muted small">Ctrl+Enter checks, Ctrl+S keeps the draft, Ctrl+Space completes.</span>
+            </div>
+            <div class="kc-result" id="kc-result" aria-live="polite"></div>
+          </div>
+          <aside class="kc-docs" id="kc-docs" data-nodirty hidden>
+            <div class="kc-docs-head"><b>kb reference</b><button type="button" class="icon" id="kc-docs-close" title="Close the docs">×</button></div>
+            <div class="kc-md" id="kc-md"><p class="muted small">Loading…</p></div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="panel wide" id="kb-summary" data-views="wizard" data-kw-tab="blocks modes">
+        <h2>What it does</h2>
+        <div class="kb-summary" id="kb-summary-body"><p class="muted small">Open the Blocks tab to build behaviours.</p></div>
       </section>
 
       <section class="panel" id="analog-pad" data-views="analog" data-gp="tester">
@@ -547,6 +604,11 @@
   <script src="advanced.js"></script>
   <script src="settings.js"></script>
   <script src="maintenance.js"></script>
+  <script src="fw-builder-core.js"></script>
+  <script src="mem-bar.js"></script>
+  <script src="features-core.js"></script>
+  <script src="features.js"></script>
+  <script src="fw-builder.js"></script>
   <script src="switch-viz.js"></script>
   <script src="switch-viz-panels.js"></script>
   <script src="scan-rate.js"></script>
@@ -556,6 +618,8 @@
   <script src="ka-picker.js"></script>
   <script src="key-wizard-steps.js"></script>
   <script src="key-wizard.js"></script>
+  <script src="key-blocks.js"></script>
+  <script src="kb-code.js"></script>
   <script src="analog.js"></script>
   <script src="stats.js"></script>
   <script src="droplet-core.js"></script>

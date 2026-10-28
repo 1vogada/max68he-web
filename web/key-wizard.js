@@ -1,4 +1,4 @@
-// Key wizard (Gamepad page, 4th tab): per key, what happens at which depth and after how long
+// Key wizard (its own page, view 'wizard'): per key, what happens at which depth and after how long
 // held (open firmware key action maps, caps 'keyActions'). Click a key, start from a template,
 // answer plain questions (depth sliders on the switch gauge, a seconds slider for holds, outputs
 // from the gamepad chips / key picker / mouse), check the summary, Save. Saves go through
@@ -112,7 +112,7 @@
       if (!W.dirty) { loadDraft(); if (W.step > 2 && !W.chosen) W.step = 2; }
     }
     drawList();
-    if (App.st.view === 'analog') App.paintKeys();
+    if (App.st.view === 'wizard') App.paintKeys();
     render();
   }
   async function write(spec) {
@@ -138,7 +138,7 @@
     }
     if (W.slot !== null) { W.stored = maps.get(W.slot) ?? null; if (!W.dirty) loadDraft(); }
     drawList();
-    if (App.st.view === 'analog' && visible) App.paintKeys();
+    if (App.st.view === 'wizard' && visible) App.paintKeys();
     render();
   }
 

@@ -2,20 +2,22 @@
 // Builds the web version into site/ (npm run build:web): the same page as the desktop
 // app (web/), plus site/driver.js, the driver bundled for the browser. Node-only modules
 // are swapped for web-build/ stand-ins: node-hid -> WebHID, fs -> localStorage, and the
-// lock, flasher and app watcher (desktop-only) -> stubs. Plugins are listed at build time.
+// lock, flasher, firmware builder and app watcher (desktop-only) -> stubs. Plugins are listed at build time.
 // Firmware: firmware/ (manifest.json, the open-firmware builds and their licences) goes on the
 // site as it is. The public repo has it (publish-firmware.js puts it there); MAX68HE_SITE_FIRMWARE
 // may name another folder. Without one the site gets an empty list and hosts no firmware.
 const fs = require('fs');
 const path = require('path');
 const esbuild = require('esbuild');
+const { vendorBlockly } = require('./vendor-blockly');
+const { vendorCodemirror } = require('./vendor-codemirror');
 
 const ROOT = path.join(__dirname, '..');
 const OUT = path.join(ROOT, 'site');
 const SHIMS = path.join(ROOT, 'web-build');
 const NODE_SHIMS = ['fs', 'path', 'os', 'crypto', 'child_process', 'http'];
 // src modules swapped as a whole (matched by their file name inside src/)
-const SRC_SHIMS = { 'lock.js': 'lock.js', 'flasher.js': 'flasher.js', 'appwatch.js': 'appwatch.js' };
+const SRC_SHIMS = { 'lock.js': 'lock.js', 'flasher.js': 'flasher.js', 'appwatch.js': 'appwatch.js', 'fw-builder.js': 'fw-builder.js' };
 
 function plugins() {
   const dir = path.join(ROOT, 'plugins');
@@ -66,6 +68,8 @@ const FIRMWARE = process.env.MAX68HE_SITE_FIRMWARE
 
 async function build({ outDir = OUT, minify = true, firmwareDir = FIRMWARE } = {}) {
   const list = plugins();
+  vendorBlockly();                                        // web/vendor/blockly: the Blocks view's Blockly, served from the site
+  vendorCodemirror();                                     // web/vendor/codemirror: the Code tab's editor
   fs.rmSync(outDir, { recursive: true, force: true });
   copyDir(path.join(ROOT, 'web'), outDir);
   for (const p of list) if (fs.existsSync(p.web)) copyDir(p.web, path.join(outDir, 'plugins', p.id));

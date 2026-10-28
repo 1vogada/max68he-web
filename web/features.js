@@ -41,13 +41,6 @@
     <div class="row-buttons"><button type="button" id="feat-all">All on</button></div>
     <details id="feat-always" hidden><summary>Always on (not switchable)</summary><ul class="small"></ul></details>`);
 
-  // Updates keeps a way here
-  const link = Object.assign(document.createElement('section'), { className: 'panel', id: 'feat-link', innerHTML: `
-    <h2>Firmware features and custom builds</h2>
-    <p class="muted small">Switch firmware parts on or off, see the flash and RAM they need, build your own firmware and flash it.</p>
-    <div class="row-buttons"><button type="button" id="feat-go">Open Features</button></div>` });
-  link.dataset.views = 'updates';
-
   let manifest = null, state = {}, use = {}, web = false, measureSeq = 0, measureTimer = 0, loading = null;
   const $ = (s) => document.querySelector(s);
 
@@ -229,12 +222,8 @@
   }
 
   function init() {
-    App.addView({ id: 'features', label: 'Features', icon: '☷', after: 'settings', board: false,
-      hint: 'Which parts of the open firmware a custom build has. Switch off what you don\'t use, see what it frees, then build and flash it.' });
-    const host = document.querySelector('.panels');
-    host.append(bars, list);
-    (document.getElementById('flash-panel') ?? host.lastElementChild).after(link);
-    $('#feat-go').onclick = () => App.goto('features');
+    // the Firmware page's "Features & size" tab (nav and tabs in index.html)
+    document.querySelector('.panels').append(bars, list);
     $('#feat-all').onclick = () => { state = C.defaults(manifest.features); $('#feat-dep').hidden = true; changed(); };
     const sort = $('#feat-sort');
     C.SORTS.forEach(([v, label]) => sort.add(new Option(label, v)));

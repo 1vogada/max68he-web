@@ -56,15 +56,18 @@
       }
       case 'kb_mode': return f.OP === 'hold' ? [{ mode: modeId(f.MODE), action: 'enter' }, 'while'] : [{ mode: modeId(f.MODE), action: f.OP }, 'press'];
       case 'kb_leave_all': return [{ leaveAllModes: true }, 'press'];
+      // the hold bar flashes TIMES times; COLOR 'default' = green (true), else '#rrggbb'
+      case 'kb_flash': return [{ flash: !f.COLOR || f.COLOR === 'default' ? true : String(f.COLOR).toLowerCase(), times: num(f.TIMES ?? K.FLASH.times) }, 'press'];
       case 'kb_raw': { try { const r = JSON.parse(blk.data); return [r.do, r.mode ?? null]; } catch { return [null, null]; } }
       default: return [null, null];
     }
   }
-  const ACTIONS = ['kb_key', 'kb_gp_button', 'kb_gp_stick', 'kb_gp_depth', 'kb_mouse_button', 'kb_mouse_move', 'kb_mouse_glide', 'kb_wheel', 'kb_mouse_keys', 'kb_mode', 'kb_leave_all', 'kb_raw'];
+  const ACTIONS = ['kb_key', 'kb_gp_button', 'kb_gp_stick', 'kb_gp_depth', 'kb_mouse_button', 'kb_mouse_move', 'kb_mouse_glide', 'kb_wheel', 'kb_mouse_keys', 'kb_mode', 'kb_leave_all', 'kb_flash', 'kb_raw'];
   const C_BLOCKS = ['kb_if', 'kb_while_mode'];
 
-  // engine: the keyboard's key action engine, so blocks it can't run (e.g. shared speed before 3) warn
-  function compile(json, { modes = [], engine } = {}) {
+  // engine: the keyboard's key action engine, so blocks it can't run (e.g. shared speed before 3) warn;
+  // flash: the keyboard has caps 'modeFlash' (false: flash blocks warn; undefined: not checked)
+  function compile(json, { modes = [], engine, flash } = {}) {
     const warnings = {}, out = [];
     const warn = (id, msg) => { (warnings[id] ??= []).includes(msg) || warnings[id].push(msg); };
     const named = (id) => modes.some((m) => m.id === id && m.name);
@@ -154,7 +157,7 @@
     for (const [key, n] of K.slotUse(out)) {
       if (n > K.MAX_RULES) for (const b of out.filter((x) => x.key === key)) warn(b.src, `${key} would need ${n} rule slots; a key has ${K.MAX_RULES} (mouse keys take 2, 3 with speed by pressure).`);
     }
-    for (const p of K.check(out, modes, { engine })) {
+    for (const p of K.check(out, modes, { engine, flash })) {
       if (/rule slots|can't be both|listed twice|held keys|held and not held|on and off|doesn't exist|doesn't go with/.test(p.msg)) continue;   // said above, in block words
       const b = out.find((x) => x.id === p.id);
       if (b) warn(b.src, p.msg); else for (const x of out.filter((y) => y.condSrc)) warn(x.condSrc, p.msg);
@@ -192,6 +195,10 @@
         if (b.mode === 'while' && d.action === 'enter') return mk('kb_mode', { OP: 'hold', MODE: String(d.mode) });
         return b.mode === 'press' ? mk('kb_mode', { OP: d.action, MODE: String(d.mode) }) : raw();
       case 'leaveAllModes': return b.mode === 'press' ? mk('kb_leave_all', {}) : raw();
+      case 'flash': {
+        const c = K.flashRgb(d.flash);
+        return mk('kb_flash', { TIMES: d.times ?? K.FLASH.times, COLOR: c ? K.hexOf(c) : 'default' });
+      }
       default: return raw();
     }
   }

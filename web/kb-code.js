@@ -462,6 +462,11 @@
       return true;
     },
     shown,
+    // a script from elsewhere (the Assistant page): into the editor, kept as the draft
+    async open(text) {
+      await boot();
+      if (replace(text, "the Assistant's script")) await tracker.save();
+    },
     canLeave: () => !tracker?.dirty || App.ui.confirmLeave(),
     fromKeyActions, parseDts, md,   // for the lead / tests: the converter and the readers
   };

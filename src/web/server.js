@@ -161,7 +161,7 @@ async function state() {
     // open firmware: user layers 1..3 (named entries only) and its options
     features: feats,
     hostApi: caps ? caps.api : 0,
-    memory: caps?.memory ?? null,   // flash / RAM use (caps 'memReport'), null = not reported
+    memory: caps?.memory ? { ...caps.memory, ...(feats.includes('kaPool') && { kaPool: (await k.keyActionsInfo()).pool }) } : null,   // flash / RAM use (caps 'memReport'), null = not reported; kaPool: the key action pool (engine 6)
     layers: hasOL ? await Promise.all([1, 2, 3].map(async (n) => (await k.getLayer(n))
       .map((v, slot) => ({ slot, name: slotName(v) })).filter((x) => x.name))) : null,
     fwOptions: hasOL ? await k.getFirmwareOptions() : null,
@@ -227,10 +227,26 @@ const ROUTES = {
     if (body.releaseDebounceMs !== undefined) c.releaseDebounceMs = intIn(body.releaseDebounceMs, 0, P.RELEASE_DEBOUNCE_MAX, 'releaseDebounceMs');
     if (body.dimMinutes !== undefined) c.dimMinutes = intIn(body.dimMinutes, 0, 255, 'dimMinutes');
     if (body.dimPercent !== undefined) c.dimPercent = intIn(body.dimPercent, 0, 100, 'dimPercent');
-    if (body.capsColor !== undefined) {
-      if (!/^#?[0-9a-f]{6}$/i.test(String(body.capsColor))) throw httpError(400, 'capsColor is rrggbb');
-      const v = parseInt(String(body.capsColor).replace('#', ''), 16);
-      c.capsColor = [v >> 16, (v >> 8) & 0xff, v & 0xff];
+    if (body.holdBar !== undefined) c.holdBar = Boolean(body.holdBar);
+    for (const key of ['capsColor', 'holdBarColor', 'holdBarEscColor']) if (body[key] !== undefined) {
+      if (!/^#?[0-9a-f]{6}$/i.test(String(body[key]))) throw httpError(400, `${key} is rrggbb`);
+      const v = parseInt(String(body[key]).replace('#', ''), 16);
+      c[key] = [v >> 16, (v >> 8) & 0xff, v & 0xff];
+    }
+    // modeFlash: [{ mode: 1..3, enter?, enterColor?: 'rrggbb' | [r,g,b], leave?, leaveColor? }] (only the modes that change;
+    // setFirmwareOptions checks the rest: caps 'modeFlash', 44 option bytes, no black)
+    if (body.modeFlash !== undefined) {
+      if (!Array.isArray(body.modeFlash)) throw httpError(400, 'modeFlash is a list of { mode, enter?, enterColor?, leave?, leaveColor? }');
+      c.modeFlash = body.modeFlash.map((e) => {
+        if (!e || typeof e !== 'object') throw httpError(400, 'modeFlash entries are { mode, enter?, enterColor?, leave?, leaveColor? }');
+        const out = { ...e };
+        for (const key of ['enterColor', 'leaveColor']) if (typeof e[key] === 'string') {
+          if (!/^#?[0-9a-f]{6}$/i.test(e[key])) throw httpError(400, `modeFlash ${key} is rrggbb`);
+          const v = parseInt(e[key].replace('#', ''), 16);
+          out[key] = [v >> 16, (v >> 8) & 0xff, v & 0xff];
+        }
+        return out;
+      });
     }
     try {
       return { fwOptions: await k.setFirmwareOptions(c) };
@@ -464,6 +480,7 @@ Object.assign(ROUTES, require('./key-action-routes').keyActionRoutes({ keyboard,
 Object.assign(ROUTES, require('./key-blocks-routes').keyBlocksRoutes({ httpError }));   // /api/key-blocks: the Blocks workspace (config/key-blocks.json)   // /api/key-actions (GET ?key=, POST, DELETE, preview, batch), /api/modes
 Object.assign(ROUTES, require('./kbcode-routes').kbcodeRoutes({ keyboard, httpError }));   // /api/kbcode/check|apply|docs (docs/KBCODE.md)
 Object.assign(ROUTES, require('./fw-builder-routes').fwBuilderRoutes());   // /api/firmware/features|size|build (src/fw-builder.js)
+Object.assign(ROUTES, require('./assistant-routes').assistantRoutes({ conn }));   // /api/assistant: the Assistant page, Settings > AI assistant
 ROUTES['GET /api/plugins'] =async () => PLUGINS.map((p) => ({ name: p.name ?? p.id, scripts: p.scripts, styles: p.styles }));
 
 function readBody(req) {

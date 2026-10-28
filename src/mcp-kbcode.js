@@ -9,7 +9,9 @@ const ABOUT = 'kbcode: a JavaScript script that describes the keyboard through a
   + 'keyboard runs on its own (up to 6 rule slots per key, 16 keys, 15 different conditions). Examples: '
   + "for (const k of kb.keys.typing) k.actuation(1.2).rapidTrigger({ press: 0.15, release: 0.15 }); "
   + "kb.lighting.effect('static').color('#ff4400'); kb.keys.wasd.forEach((k) => k.color('cyan')); "
-  + "const m = kb.mode('Mouse'); kb.key('Up').when('press').if({ mode: m }).do(kb.mouse.move('up', { shareSpeed: true })). "
+  + "const m = kb.mode('Mouse'); kb.key('Up').when('press').if({ mode: m }).do(kb.mouse.move('up', { shareSpeed: true })); "
+  + "kb.mode('Tilde', { flash: 'cyan', leaveFlash: false }) (the hold bar column flashes when the mode turns on / off; newer firmware); "
+  + "kb.key('Home').when('press').do(kb.flash('magenta', 5)). "
   + 'Call get_kb_code_docs for the full API (a TypeScript declaration) and more examples.';
 
 function registerKbcodeTools({ server, z, conn }) {

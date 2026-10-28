@@ -446,14 +446,87 @@ const UNICODE_MODES = ['windows', 'linux', 'mac'], TEXT_TYPING_MODES = ['keep', 
 // bytes 12..15 (CAPS2 bits 9..11, reserved = 0 before): compatibility mode (6KRO), release debounce ms,
 // dim after N idle minutes, dim level % (0 = the firmware's 30 %)
 const RELEASE_DEBOUNCE_MAX = 10, DIM_DEFAULT_PERCENT = 30;
+// bytes 16..19 (CAPS3 bit 8 'holdBar', firmware HOLDBAR): [16] bit0 = 1 hold progress bar off (0 = on),
+// [17..19] its colour, 0,0,0 = the default green. Older firmware has no such bytes (reads 0 = on, green).
+const HOLD_BAR_DEFAULT_COLOR = [0, 255, 0];
+// bytes 20..22 (+ 23 = 0): the bar's colour while an Esc hold drives it (Fn+Esc hatch, a HOLD rule on Esc),
+// 0,0,0 = the default red. Firmware before it answers 0xFE 0 with [2] = 16 / 20: holdBarEscColor is left out.
+const HOLD_BAR_ESC_DEFAULT_COLOR = [255, 0, 0];
+// bytes 24..43 (CAPS3 bit 9 'modeFlash', firmware MODEFLASH, options v4: 0xFE 0 answers [2] = 44): the hold
+// bar column flashes 3x when a key action mode turns on, 1x when it turns off. [24] off bits: bit n-1 = no
+// enter flash for mode n, bit n+3 = no leave flash (other bits 0; 0 = all on); mode n's enter colour at
+// 25 + 6(n-1) (0,0,0 = green), its leave colour at 28 + 6(n-1) (0,0,0 = dim white #404040); [43] = 0.
+// Firmware before it answers [2] = 16 / 20 / 24: modeFlash is left out, and a write ends at byte 23 (only
+// what that firmware takes). 0,0,0 always means the default, so black can't be a flash colour: the driver
+// refuses it where a user gives a colour (mergeModeFlash, the FLASH rule) and writes a default as 0,0,0.
+const FW_OPTS_LEN = 44;
+const MODE_FLASH = { MODES: 3, OFF: 24, COLORS: 25, ENTER_DEFAULT: [0, 255, 0], LEAVE_DEFAULT: [64, 64, 64] };
+const BLACK_FLASH = 'black (0, 0, 0) can\'t flash: the keyboard reads 0, 0, 0 as the default colour';
+const MODE_FLASH_NEEDS = 'Mode flash needs a newer open firmware (feature "modeFlash")';
+const isRgb = (c) => Array.isArray(c) && c.length === 3 && c.every((v) => Number.isInteger(v) && v >= 0 && v <= 255);
+
+// option bytes 0..43 -> [{ mode: 1..3, enter, enterColor, leave, leaveColor }] (defaults filled in)
+function parseModeFlash(o) {
+  const bits = o[MODE_FLASH.OFF] ?? 0;
+  return Array.from({ length: MODE_FLASH.MODES }, (_, i) => {
+    const at = MODE_FLASH.COLORS + 6 * i, e = [0, 1, 2].map((k) => o[at + k] ?? 0), l = [3, 4, 5].map((k) => o[at + k] ?? 0);
+    return { mode: i + 1, enter: !(bits & (1 << i)), enterColor: e.some(Boolean) ? e : [...MODE_FLASH.ENTER_DEFAULT],
+      leave: !(bits & (1 << (i + 4))), leaveColor: l.some(Boolean) ? l : [...MODE_FLASH.LEAVE_DEFAULT] };
+  });
+}
+// [{ mode, enter, enterColor, leave, leaveColor }] -> option bytes 24..43 (a default colour goes as 0,0,0)
+function modeFlashBytes(list) {
+  const out = new Array(FW_OPTS_LEN - MODE_FLASH.OFF).fill(0);
+  const col = (c, def) => (!isRgb(c) || c.join() === def.join() ? [0, 0, 0] : c);
+  (list ?? []).forEach((e, i) => {
+    const n = e?.mode ?? i + 1;
+    if (!Number.isInteger(n) || n < 1 || n > MODE_FLASH.MODES) throw new Error(`mode flash: mode is 1..${MODE_FLASH.MODES}`);
+    if (e.enter === false) out[0] |= 1 << (n - 1);
+    if (e.leave === false) out[0] |= 1 << (n + 3);
+    out.splice(1 + 6 * (n - 1), 6, ...col(e.enterColor, MODE_FLASH.ENTER_DEFAULT), ...col(e.leaveColor, MODE_FLASH.LEAVE_DEFAULT));
+  });
+  return out;
+}
+// the current per-mode list + changes ([{ mode, enter?, enterColor?, leave?, leaveColor? }], each merged
+// into its mode) -> the new list; throws on a bad change (black included)
+function mergeModeFlash(cur, changes) {
+  const list = parseModeFlash([...new Array(MODE_FLASH.OFF).fill(0), ...modeFlashBytes(cur)]);
+  if (!Array.isArray(changes)) throw new Error('modeFlash is a list of { mode: 1..3, enter?, enterColor?, leave?, leaveColor? }');
+  const seen = new Set();
+  changes.forEach((c, i) => {
+    const w = `modeFlash[${i}]`;
+    if (!c || typeof c !== 'object' || Array.isArray(c)) throw new Error(`${w} is { mode: 1..3, enter?, enterColor?, leave?, leaveColor? }`);
+    const bad = Object.keys(c).filter((k) => !['mode', 'enter', 'enterColor', 'leave', 'leaveColor'].includes(k));
+    if (bad.length) throw new Error(`${w}: unknown field${bad.length > 1 ? 's' : ''} ${bad.map((b) => `"${b}"`).join(', ')}`);
+    if (!Number.isInteger(c.mode) || c.mode < 1 || c.mode > MODE_FLASH.MODES) throw new Error(`${w}.mode is 1..${MODE_FLASH.MODES}`);
+    if (seen.has(c.mode)) throw new Error(`modeFlash names mode ${c.mode} twice`);
+    seen.add(c.mode);
+    const e = list[c.mode - 1];
+    for (const k of ['enter', 'leave']) {
+      if (c[k] === undefined) continue;
+      if (typeof c[k] !== 'boolean') throw new Error(`${w}.${k} is true or false`);
+      e[k] = c[k];
+    }
+    for (const k of ['enterColor', 'leaveColor']) {
+      if (c[k] === undefined) continue;
+      if (!isRgb(c[k])) throw new Error(`${w}.${k} is [r, g, b], 0..255 each`);
+      if (!c[k].some(Boolean)) throw new Error(`${w}.${k}: ${BLACK_FLASH}`);
+      e[k] = [...c[k]];
+    }
+  });
+  return list;
+}
 
 function parseFwOptions(r) {
-  const o = r.slice(8, 24);
+  const o = r.slice(8, 8 + FW_OPTS_LEN), hc = [o[17] ?? 0, o[18] ?? 0, o[19] ?? 0], ec = [o[20] ?? 0, o[21] ?? 0, o[22] ?? 0];
   return { capsIndicator: o[0] === 1, capsColor: [o[1], o[2], o[3]], snapMode: SNAP_MODES[o[4]] ?? 'last',
     statusGuide: o[5] === 1, idleMinutes: o[6], layerIndicator: o[7] === 1, fnHold: o[8] === 1,
     unicode: UNICODE_MODES[o[9]] ?? 'windows', perf: o[10] === 1, textTyping: TEXT_TYPING_MODES[o[11]] ?? 'keep',
     compatMode: o[12] === 1, releaseDebounceMs: Math.min(o[13] ?? 0, RELEASE_DEBOUNCE_MAX), dimMinutes: o[14] ?? 0,
-    dimPercent: Math.min(o[15] || DIM_DEFAULT_PERCENT, 100) };
+    dimPercent: Math.min(o[15] || DIM_DEFAULT_PERCENT, 100),
+    holdBar: !((o[16] ?? 0) & 1), holdBarColor: hc.some(Boolean) ? hc : [...HOLD_BAR_DEFAULT_COLOR],
+    ...(r[2] && r[2] < 24 ? {} : { holdBarEscColor: ec.some(Boolean) ? ec : [...HOLD_BAR_ESC_DEFAULT_COLOR] }),
+    ...(r[2] && r[2] < FW_OPTS_LEN ? {} : { modeFlash: parseModeFlash(o) }) };
 }
 
 function fwOptionsPacket(o) {
@@ -466,10 +539,14 @@ function fwOptionsPacket(o) {
   };
   const idle = int('idleMinutes', 255, NaN), release = int('releaseDebounceMs', RELEASE_DEBOUNCE_MAX), dim = int('dimMinutes', 255);
   const dimPct = int('dimPercent', 100, DIM_DEFAULT_PERCENT);
-  const c = (o.capsColor ?? [255, 255, 255]).map((v) => Math.max(0, Math.min(255, v | 0)));
+  const rgb = (v, d) => (v ?? d).map((x) => Math.max(0, Math.min(255, x | 0)));
+  const c = rgb(o.capsColor, [255, 255, 255]), hb = rgb(o.holdBarColor, HOLD_BAR_DEFAULT_COLOR);
+  const he = rgb(o.holdBarEscColor, HOLD_BAR_ESC_DEFAULT_COLOR);
   return hostPacket(0xfe, [1], [o.capsIndicator ? 1 : 0, ...c, snap, o.statusGuide ? 1 : 0, idle, o.layerIndicator ? 1 : 0,
     o.fnHold ? 1 : 0, Math.max(0, UNICODE_MODES.indexOf(o.unicode ?? 'windows')), o.perf ? 1 : 0, typing,
-    o.compatMode ? 1 : 0, release, dim, dim ? dimPct : 0]);
+    o.compatMode ? 1 : 0, release, dim, dim ? dimPct : 0, o.holdBar === false ? 1 : 0, ...hb, ...he, 0,
+    // bytes 24..43 only with modeFlash (read from firmware that has them): older firmware gets its 24
+    ...(o.modeFlash ? modeFlashBytes(o.modeFlash) : [])]);
 }
 
 // full factory reset through 0xFE 17 (CAPS2 'resetFe'): the open firmware's 0x01 reset, which packet() / hid.js refuse
@@ -574,8 +651,11 @@ const HOST_CAPS2 = ['games', 'dksLevels', 'fnLayers', 'textKeys', 'calibration',
 // bits 2..13 are the switchable firmware features (features.json caps); bit 14 says they follow
 // the build (without it, older firmware, they are not reported)
 const HOST_CAPS3 = ['pressureFx', 'memReport', 'dks', 'advKeys', 'kaModes', 'mouseKeys', 'mouseKeysPressure',
-  'analogMouse', null, null, null, 'scanTiming', 'pressCounters', 'userLayers', 'buildBits'];
+  'analogMouse', 'holdBar', 'modeFlash', 'kaPool', 'scanTiming', 'pressCounters', 'userLayers', 'buildBits'];
 const CAPS3_BUILD = 0x4000;
+// bit 9 'modeFlash' (firmware MODEFLASH: options [24..43], key action FLASH output 11) counts with bit 15
+// alone: the firmware that has it always reports its build bits
+const CAPS3_MODE_FLASH = 9;
 // caps 'memReport': CAPS reply [12..35] = six u32 LE, how much of the keyboard the running image
 // uses (firmware host_api.h host_mem_t). stackPeak 0 = not measured.
 const MEM_FIELDS = ['flashUsed', 'flashSize', 'ramStatic', 'ramReserved', 'ramSize', 'stackPeak'];
@@ -590,7 +670,7 @@ function parseCaps(r) {
   const caps3 = Boolean(bits3 & CAPS3_VALID);
   return { api: r[1], keys: r[2], leds: r[3], cols: r[4], rows: r[5], ...(caps3 ? { caps3 } : {}),
     features: [...HOST_CAPS.filter((_, i) => bits & (1 << i)), ...HOST_CAPS2.filter((_, i) => bits2 & (1 << i)),
-      ...(caps3 ? HOST_CAPS3.filter((f, i) => f && bits3 & (1 << i) && (i < 2 || bits3 & CAPS3_BUILD)) : [])],
+      ...(caps3 ? HOST_CAPS3.filter((f, i) => f && bits3 & (1 << i) && (i < 2 || i === CAPS3_MODE_FLASH || bits3 & CAPS3_BUILD)) : [])],
     ...(caps3 && (bits3 & 2) ? { memory: parseMemory(r) } : {}) };
 }
 
@@ -752,53 +832,89 @@ function parseSeqStatus(r) {
 // speed; engine 2 refuses a non-zero ARG mode / c. Engine 4 (INFO [12] = 4): ARG c bits 1..2 = speed by
 // (0 time, 1 pressure, 2 both; 3 refused), and with 1 / 2 a DEPTH rule right after the ARG:
 // [0x0F, 0, 0, 0, from, to, 0, 0] in 0.1 mm (0 <= from < to <= 40); engine 3 refuses those bits.
+// FLASH output 11 (CAPS3 bit 9 'modeFlash', any engine): [trigger, TIMES 1..15, tval, 11, R, G, B]: the mode
+// byte is the number of flashes, R, G, B 0,0,0 = green; the hold bar column flashes that often (once per fire).
+// Engine 6 (caps 'kaPool', INFO [12] = 6): the table is sized from the keyboard's free RAM / flash. A key
+// takes any number of records (record [6] = part, 6 rules each), a record's condition nibble c means entry
+// bank * 15 + c (record [7] = bank), condition entries are 12 bytes ([k0, k1, k2, v5 byte, on u32, off u32]),
+// 32 modes (1..3 = user layers, 4..32 flags), mode records carry their own flash settings ([24..31]).
+// CONDS / MODES are engine 2..5's sizes; the keyboard's are in keyActionsInfo().
 const KA = { OP: 0xee, INFO: 0, GET: 1, SET: 2, LIST: 3, COND_GET: 4, COND_SET: 5, MODE_GET: 6, MODE_SET: 7,
-  RECORD: 56, MAX_RULES: 6, RULE: 8, CONDS: 15, MODES: 3, NAME: 16, ARG: 15 };
+  RECORD: 56, MAX_RULES: 6, RULE: 8, CONDS: 15, MODES: 3, NAME: 16, ARG: 15, FLASH: 11, FLASH_MAX: 15,
+  MAX_CONDS: 255, MAX_MODES: 32, BANK: 15, COND_BYTES: 12, MAX_PARTS: 255, MF_SET: 0x80 };
 const KA_ERRORS = [null, 'the key has no map', 'the key action table is full', 'bad rule', 'bad slot', 'in use'];
 const KA_COND_FREE = [0xff, 0xff, 0xff, 0];
 const kaSlot = (slot) => { checkSlot(slot); return slot; };
 const kaInfoPacket = () => hostPacket(KA.OP, [KA.INFO]);
-const kaGetPacket = (slot) => hostPacket(KA.OP, [KA.GET, kaSlot(slot)]);
+const kaGetPacket = (slot, part = 0) => hostPacket(KA.OP, [KA.GET, kaSlot(slot), part]);
 const kaListPacket = (start) => hostPacket(KA.OP, [KA.LIST, kaSlot(start)]);
 function kaSetPacket(slot, record) {
   if (record.length !== KA.RECORD) throw new Error(`a key action record is ${KA.RECORD} bytes`);
   return hostPacket(KA.OP, [KA.SET, kaSlot(slot)], record);
 }
-// { slot, gap, flags, press, rules: [{ trigger, mode, tval, output, a, b, c }] } (wire units) <-> 56 bytes
-function encodeKaRecord({ slot, gap = 0, flags = 0, press = 0, rules = [] }) {
-  if (rules.length > KA.MAX_RULES) throw new Error(`at most ${KA.MAX_RULES} rules per key`);
+// { slot, gap, flags, press, part?, bank?, rules: [{ trigger, mode, tval, output, a, b, c, cond? }] } (wire units)
+// <-> 56 bytes. cond is the entry number (1-based); on the wire a rule names entry bank * 15 + nibble.
+function encodeKaRecord({ slot, gap = 0, flags = 0, press = 0, part = 0, bank = 0, rules = [] }) {
+  if (rules.length > KA.MAX_RULES) throw new Error(`at most ${KA.MAX_RULES} rules per record`);
   const r = new Array(KA.RECORD).fill(0);
-  r.splice(0, 6, slot, rules.length, gap, flags, press & 0xff, (press >> 8) & 0xff);
-  rules.forEach((x, i) => r.splice(8 + i * KA.RULE, KA.RULE,
-    (x.trigger & 0x0f) | ((x.cond ?? 0) << 4), x.mode, x.tval & 0xff, (x.tval >> 8) & 0xff,
-    x.output, x.a & 0xff, (x.b ?? 0) & 0xff, (x.c ?? 0) & 0xff));
+  r.splice(0, 8, slot, rules.length, gap, flags, press & 0xff, (press >> 8) & 0xff, part, bank);
+  rules.forEach((x, i) => {
+    const nib = x.cond ? x.cond - bank * KA.BANK : 0;
+    if (nib < 0 || nib > KA.BANK) throw new Error(`condition entry ${x.cond} is not in bank ${bank} (entries ${bank * KA.BANK + 1}..${bank * KA.BANK + KA.BANK})`);
+    r.splice(8 + i * KA.RULE, KA.RULE, (x.trigger & 0x0f) | (nib << 4), x.mode, x.tval & 0xff, (x.tval >> 8) & 0xff,
+      x.output, x.a & 0xff, (x.b ?? 0) & 0xff, (x.c ?? 0) & 0xff);
+  });
   return r;
 }
 function decodeKaRecord(b) {
-  const n = Math.min(b[1], KA.MAX_RULES);
-  return { slot: b[0], gap: b[2], flags: b[3], press: b[4] | (b[5] << 8),
+  const n = Math.min(b[1], KA.MAX_RULES), bank = b[7] ?? 0;
+  return { slot: b[0], gap: b[2], flags: b[3], press: b[4] | (b[5] << 8), ...(b[6] && { part: b[6] }), ...(bank && { bank }),
     rules: Array.from({ length: n }, (_, i) => {
-      const o = 8 + i * KA.RULE;
-      return { trigger: b[o] & 0x0f, cond: b[o] >> 4, mode: b[o + 1], tval: b[o + 2] | (b[o + 3] << 8), output: b[o + 4], a: b[o + 5], b: b[o + 6], c: b[o + 7] };
+      const o = 8 + i * KA.RULE, nib = b[o] >> 4;
+      return { trigger: b[o] & 0x0f, cond: nib ? bank * KA.BANK + nib : 0, mode: b[o + 1], tval: b[o + 2] | (b[o + 3] << 8), output: b[o + 4], a: b[o + 5], b: b[o + 6], c: b[o + 7] };
     }) };
 }
 // engine 1 = the first key action engine (INFO [12] 0 / absent): no conditions, modes or mouse keys;
 // 2 / 3 as INFO [12] says (3: mouse keys can share speed)
+// engine 6: entries / used / conditions as u16, activeModes u32, pool { bytes, used }, imageBytes
+const u16 = (r, i) => r[i] | (r[i + 1] << 8);
+const u32 = (r, i) => (r[i] | (r[i + 1] << 8) | (r[i + 2] << 16) | (r[i + 3] << 24)) >>> 0;
 function parseKaInfo(r) {
   const engine = r[12] >= 2 ? r[12] : 1;
-  return { entries: r[8], maxRules: r[9], used: r[10], recordBytes: r[11], engine,
+  const out = { entries: r[8], maxRules: r[9], used: r[10], recordBytes: r[11], engine,
     conditions: engine >= 2 ? r[13] : 0, modes: engine >= 2 ? r[14] : 0, activeModes: engine >= 2 ? r[15] : 0 };
+  if (engine < 6) return out;
+  return { ...out, entries: u16(r, 20), used: u16(r, 22), conditions: u16(r, 24), activeModes: u32(r, 16), bank: r[26] || KA.BANK,
+    maxParts: r[27], pool: { bytes: u32(r, 28), used: u32(r, 32) }, imageBytes: u16(r, 36) };
 }
 const kaIdx = (i, max, what) => { if (!Number.isInteger(i) || i < 1 || i > max) throw new Error(`${what} is 1..${max}`); return i; };
-const kaCondGetPacket = (idx) => hostPacket(KA.OP, [KA.COND_GET, kaIdx(idx, KA.CONDS, 'condition entry')]);
+const kaCondGetPacket = (idx) => hostPacket(KA.OP, [KA.COND_GET, kaIdx(idx, KA.MAX_CONDS, 'condition entry')]);
+// entry: 4 bytes (modes 1..3 in byte 3) or 12 ([k0, k1, k2, v5 byte, on u32, off u32]); sent in its shortest
+// form: 4 bytes for modes 1..3 (every engine reads them), 12 when it names modes 4..32 (engine 6)
 function kaCondSetPacket(idx, entry) {
-  if (!Array.isArray(entry) || entry.length !== 4) throw new Error('a condition entry is 4 bytes');
-  return hostPacket(KA.OP, [KA.COND_SET, kaIdx(idx, KA.CONDS, 'condition entry')], entry);
+  if (!Array.isArray(entry) || (entry.length !== 4 && entry.length !== KA.COND_BYTES)) throw new Error('a condition entry is 4 or 12 bytes');
+  return hostPacket(KA.OP, [KA.COND_SET, kaIdx(idx, KA.MAX_CONDS, 'condition entry')], compactCond(entry));
 }
-const kaModeGetPacket = (n) => hostPacket(KA.OP, [KA.MODE_GET, kaIdx(n, KA.MODES, 'mode')]);
-// name: string (UTF-8, at most 16 bytes; '' = unnamed)
-function kaModeSetPacket(n, name) {
-  return hostPacket(KA.OP, [KA.MODE_SET, kaIdx(n, KA.MODES, 'mode')], encodeModeName(name));
+// 4 or 12 bytes -> 12 (masks from byte 3 when the masks are 0, byte 3 from the masks' modes 1..3)
+function wideCond(e) {
+  let on = e.length === KA.COND_BYTES ? u32(e, 4) : 0, off = e.length === KA.COND_BYTES ? u32(e, 8) : 0;
+  if (!on && !off) { on = e[3] & 7; off = (e[3] >> 4) & 7; }
+  const le = (v) => [v & 0xff, (v >>> 8) & 0xff, (v >>> 16) & 0xff, (v >>> 24) & 0xff];
+  return [e[0], e[1], e[2], (on & 7) | ((off & 7) << 4), ...le(on), ...le(off)];
+}
+// 12 (or 4) bytes -> the shortest form: 4 bytes when the modes are 1..3, else 12
+function compactCond(e) {
+  const w = wideCond(e), on = u32(w, 4), off = u32(w, 8);
+  return (on | off) >>> 3 ? w : w.slice(0, 4);
+}
+const kaModeGetPacket = (n) => hostPacket(KA.OP, [KA.MODE_GET, kaIdx(n, KA.MAX_MODES, 'mode')]);
+// name: string (UTF-8, at most 16 bytes; '' = unnamed); flash (engine 6, optional): { enter, enterColor, leave,
+// leaveColor } -> [24..31] with bit 7 set (the mode's own flash settings); without it the settings stay
+function kaModeSetPacket(n, name, flash) {
+  return hostPacket(KA.OP, [KA.MODE_SET, kaIdx(n, KA.MAX_MODES, 'mode')], [...encodeModeName(name), ...(flash ? modeRecFlash(flash) : [])]);
+}
+function modeRecFlash({ enter = true, enterColor = [0, 0, 0], leave = true, leaveColor = [0, 0, 0] }) {
+  return [KA.MF_SET | (enter ? 0 : 1) | (leave ? 0 : 2), ...enterColor, 0, ...leaveColor];
 }
 function encodeModeName(name) {
   const b = [...new TextEncoder().encode(String(name))];
@@ -810,8 +926,10 @@ function decodeModeName(bytes) {
   const end = bytes.indexOf(0);
   return new TextDecoder().decode(Uint8Array.from(end < 0 ? bytes : bytes.slice(0, end)));
 }
-const parseKaCond = (r) => ({ idx: r[3], entry: r.slice(8, 12) });
-const parseKaMode = (r) => ({ id: r[3], active: r[4], name: decodeModeName(r.slice(8, 8 + KA.NAME)) });
+const parseKaCond = (r) => ({ idx: r[3], entry: compactCond(r.slice(8, 8 + KA.COND_BYTES)) });
+// flash: the mode's own flash settings (engine 6, [24] bit 7), else null (options / defaults)
+const parseKaMode = (r) => ({ id: r[3], active: r[4], name: decodeModeName(r.slice(8, 8 + KA.NAME)),
+  flash: r[24] & KA.MF_SET ? { enter: !(r[24] & 1), enterColor: r.slice(25, 28), leave: !(r[24] & 2), leaveColor: r.slice(29, 32) } : null });
 
 // Travel stream input report: [5, 0x1B, lo, hi, slot], report ID optional.
 function parseTravel(data) {
@@ -827,13 +945,14 @@ module.exports = {
   reportRatePacket, userPicPages, encodeMacro, decodeMacro, macroPages,
   CUSTOM_MODE, customModePacket, liveFramePackets, OPEN_LIGHT_MODES, BASE_OPEN_LIGHT_MODES, openModesFor,
   FN_LAYERS, fnLayerGetPacket, fnLayerPackets, TEXT_COUNT, TEXT_MAX_LEN, TEXT_PAGES, textGetPacket, textPackets,
-  SNAP_MODES, UNICODE_MODES, TEXT_TYPING_MODES, RELEASE_DEBOUNCE_MAX, DIM_DEFAULT_PERCENT, parseFwOptions, fwOptionsPacket, fwOptionsGetPacket, fwFactoryResetPacket, pressCountPacket, pressResetPacket, scanStatsPacket, scanTunePacket, parseScanStats, LAYER_PAGES, layerGetPacket, layerPackets,
+  SNAP_MODES, UNICODE_MODES, TEXT_TYPING_MODES, RELEASE_DEBOUNCE_MAX, DIM_DEFAULT_PERCENT, HOLD_BAR_DEFAULT_COLOR, HOLD_BAR_ESC_DEFAULT_COLOR, FW_OPTS_LEN, MODE_FLASH, MODE_FLASH_NEEDS, BLACK_FLASH, parseModeFlash, modeFlashBytes, mergeModeFlash, parseFwOptions, fwOptionsPacket, fwOptionsGetPacket, fwFactoryResetPacket, pressCountPacket, pressResetPacket, scanStatsPacket, scanTunePacket, parseScanStats, LAYER_PAGES, layerGetPacket, layerPackets,
   HOST, HOST_CAPS, hostPacket, parseCaps, parseMemory, claimPackets, releaseAllPacket, injectPacket, overlayPackets,
   GAMEPAD_TARGETS, GAMEPAD_CURVES, gamepadGetPacket, gamepadSetPacket, parseGamepad, gamepadBindPackets, gamepadGetBindPacket,
   clearOverlayPacket, parseKeyEvent,
   SEQ, SEQ_EVENTS, seqPacket, seqPlayPacket, seqAppendPackets, parseSeqStatus,
   KA, KA_ERRORS, kaInfoPacket, kaGetPacket, kaSetPacket, kaListPacket, encodeKaRecord, decodeKaRecord, parseKaInfo,
   KA_COND_FREE, kaCondGetPacket, kaCondSetPacket, kaModeGetPacket, kaModeSetPacket, encodeModeName, decodeModeName, parseKaCond, parseKaMode,
+  wideCond, compactCond, modeRecFlash,
   KIND, NO_PARTNER, dksActionByte, dksCells, dksActionsPacket,
   DKS_ACTIONS, DKS_MAX_LEVELS, DKS_MIN_MM, DKS_MAX_MM, dksReadPacket, dksWritePacket, parseDks, parseOptions, optionsPacket,
 };

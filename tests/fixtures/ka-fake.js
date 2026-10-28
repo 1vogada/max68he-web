@@ -10,6 +10,8 @@
 // every engine refuses an ARG rule that is not right after a mouse keys rule (or its DEPTH rule) or a
 // missing DEPTH rule (3 + rule index; a missing DEPTH rule: the ARG rule's, as the firmware). Engine 5
 // (engine: 5) takes condition key bytes 0x80..0xFE (slot & 0x7F must not be held); older ones refuse them.
+// caps3 (CAPS word 3): with bit 9 'modeFlash' a FLASH rule (output 11) is taken with its count (mode byte)
+// 1..15; without it, or with another count, refused (3 + rule index), as the firmware does.
 // set(slot, body) may return an error code (refused) or other bytes to store instead.
 const { Keyboard } = require('../../src/keyboard');
 const M = require('../../src/key-modes');
@@ -35,7 +37,7 @@ function badArgRule(body, engine) {
   return undefined;
 }
 
-function fakeKeyboard({ caps2 = 1 << 15, entries = 4, custom = true, set = () => undefined, engine = 1, keys = KEYS, active = 0 } = {}) {
+function fakeKeyboard({ caps2 = 1 << 15, caps3 = 0, entries = 4, custom = true, set = () => undefined, engine = 1, keys = KEYS, active = 0 } = {}) {
   const sent = [], table = new Map();
   const conds = Array.from({ length: 15 }, () => [...FREE]), names = ['', '', ''];
   const used = (idx) => [...table.values()].some((b) => [...Array(b[1]).keys()].some((i) => ruleCond(b, i) === idx));
@@ -43,10 +45,13 @@ function fakeKeyboard({ caps2 = 1 << 15, entries = 4, custom = true, set = () =>
     const rules = [...Array(Math.min(body[1], 6)).keys()];
     const badCond = rules.find((i) => ruleCond(body, i) && (engine < 2 || M.isFree(conds[ruleCond(body, i) - 1])));
     const badArg = badArgRule(body, engine);
+    const flashOk = (caps3 & 0x8200) === 0x8200;
+    const badFlash = rules.find((i) => (body[8 + i * 8] & 0x0f) !== 15 && body[12 + i * 8] === 11 && (!flashOk || body[9 + i * 8] < 1 || body[9 + i * 8] > 15));
     if (slot >= 128 || body[0] !== slot) r[2] = 4;
     else if (body[1] > 6) { r[2] = 3; r[3] = 0xff; }
     else if (badCond !== undefined) { r[2] = 3; r[3] = badCond; }
     else if (badArg !== undefined) { r[2] = 3; r[3] = badArg; }
+    else if (badFlash !== undefined) { r[2] = 3; r[3] = badFlash; }
     else if (!body[1]) table.delete(slot);
     else if (!table.has(slot) && table.size >= entries) r[2] = 2;
     else { table.set(slot, body); r.splice(8, 56, ...body); }
@@ -77,7 +82,7 @@ function fakeKeyboard({ caps2 = 1 << 15, entries = 4, custom = true, set = () =>
     async query(p) {
       sent.push(p);
       const r = [...p];
-      if (p[0] === 0xf8) { r[8] = caps2 & 0xff; r[9] = caps2 >> 8; return r; }
+      if (p[0] === 0xf8) { r[8] = caps2 & 0xff; r[9] = caps2 >> 8; r[10] = caps3 & 0xff; r[11] = caps3 >> 8; return r; }
       if (p[0] !== 0xee) return r;
       r.fill(0, 2);
       const slot = p[2];

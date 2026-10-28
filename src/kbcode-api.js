@@ -196,9 +196,12 @@ function sandboxApi(META) {
   for (const [name, slots] of Object.entries(META.groups)) keysApi[name] = named(slots);
 
   // ---- modes ------------------------------------------------------------------------------
-  function modeRef(name, id) {
+  // kb.mode(name), kb.mode(name, id), kb.mode(name, { flash, leaveFlash }) or kb.mode(name, id, { ... })
+  function modeRef(name, id, o) {
     const n = clone(name);
-    rec('mode', { name: n, id: clone(id) });
+    const flashOpts = id !== null && typeof id === 'object' && !isArray(id) && !MODE_REFS.has(id) ? id : o;
+    const num = flashOpts === id ? undefined : id;
+    rec('mode', { name: n, id: clone(num), ...(flashOpts !== undefined && { flash: opts(flashOpts) }) });
     const ref = freeze({
       name: n,
       enter: () => freeze({ mode: n, action: 'enter' }),
@@ -284,6 +287,8 @@ function sandboxApi(META) {
     lighting,
     mode: modeRef,
     leaveAllModes: () => freeze({ leaveAllModes: true }),
+    // action: the hold bar column flashes `times` (1..15, default 3) times in `color` (default green)
+    flash: (color, times) => freeze({ flash: color === undefined ? true : clone(color), times: clone(times) }),
     resetKeyActions() { rec('resetKeyActions', {}); return kb; },
     send: (key) => freeze({ key: clone(key) }),
     mouse,
@@ -295,6 +300,7 @@ function sandboxApi(META) {
     pollingRate(hz) { rec('polling', { value: clone(hz) }); return kb; },
     firmwareOptions(o) { rec('fwOptions', { value: opts(o) }); return kb; },
     textTyping(m) { rec('fwOptions', { value: { textTyping: clone(m) } }); return kb; },
+    holdBar(o) { rec('holdBar', { value: opts(o) }); return kb; },
     rgb,
     hsl,
   });

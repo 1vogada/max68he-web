@@ -64,7 +64,7 @@
       S.B = window.Blockly;
       D().install(S.B, { keys: boardKeys, modes: () => S.modes, arm });
       S.ws = S.B.inject($('#kb-ws'), {
-        renderer: 'zelos', theme: D().theme(S.B), toolbox: D().toolbox(S.modes), media: 'vendor/blockly/media/', sounds: false, trashcan: true,
+        renderer: 'zelos', theme: D().theme(S.B), toolbox: D().toolbox(S.modes, { flash: hasFlash() }), media: 'vendor/blockly/media/', sounds: false, trashcan: true,
         zoom: { controls: true, wheel: false, pinch: true, startScale: innerWidth < 700 ? 0.6 : 0.75 }, move: { scrollbars: true, drag: true, wheel: true },
       });
       S.ws.registerButtonCallback('kbMakeMode', () => P().makeMode(api));
@@ -78,6 +78,8 @@
     return S.ready;
   }
 
+  // the keyboard has the hold bar flash (caps 'modeFlash'): the Lights blocks, no warning on a flash block
+  const hasFlash = () => (App.st.features ?? []).includes('modeFlash');
   const boardKeys = () => [...App.keyEls.values()].map((el) => el.dataset.name).filter(Boolean);
   const engineOf = (r) => (typeof r.engine === 'number' ? r.engine : r.engine?.version ?? 0);
   const modesOf = (list) => blankModes().map((m) => ({ ...m, ...(list ?? []).find((x) => x.id === m.id) }));
@@ -134,13 +136,13 @@
       for (const b of S.ws.getAllBlocks(false)) if (b.type === 'kb_mouse_keys') b.onchange?.();
     } catch (e) { App.ui.showError($('#kb-panel'), `Could not show the saved blocks: ${e.message}`); }
     finally { S.B.Events.enable(); S.loading = false; }
-    S.ws.updateToolbox(D().toolbox(S.modes));
+    S.ws.updateToolbox(D().toolbox(S.modes, { flash: hasFlash() }));
     S.serverWarn = {};
     recompile();
     P().drawModes(S, api);
   }
   function collectKeys(json) {
-    const walk = (b) => { if (!b) return; D().allowKeys([b.fields?.KEY, String(b.fields?.TARGET ?? '').replace(/^key:/, '')]); Object.values(b.inputs ?? {}).forEach((i) => walk(i.block)); walk(b.next?.block); };
+    const walk = (b) => { if (!b) return; D().allowKeys([b.fields?.KEY, String(b.fields?.TARGET ?? '').replace(/^key:/, '')]); D().allowColours([b.fields?.COLOR]); Object.values(b.inputs ?? {}).forEach((i) => walk(i.block)); walk(b.next?.block); };
     (json?.blocks?.blocks ?? []).forEach(walk);
   }
 
@@ -178,7 +180,7 @@
   function recompile() {
     if (!S.ws) return null;
     const json = S.B.serialization.workspaces.save(S.ws);
-    const r = C().compile(json, { modes: S.modes, engine: S.engine });
+    const r = C().compile(json, { modes: S.modes, engine: S.engine, flash: hasFlash() });
     for (const [id, msg] of Object.entries(S.serverWarn)) (r.warnings[id] ??= []).push(msg);
     for (const b of S.ws.getAllBlocks(false)) {
       const w = r.warnings[b.id]?.join('\n') ?? null;
@@ -346,6 +348,7 @@
         canLeave: () => (code() ? code().canLeave() : ours() ? App.keyBlocks.canLeave() : wiz.canLeave()),
       });
       for (const ev of ['change', 'click']) $('#kb-modes-list').addEventListener(ev, (e) => App.kbPanels?.onModes(e));
+      App.modeFlash?.mount($('#kb-mode-flash'), { instant: true });
       $('#kb-make-mode').addEventListener('click', () => boot().then(() => P().makeMode(api)).catch(() => {}));
       $('#kb-rebuild').addEventListener('click', () => {
         if (!confirm('Replace these blocks with blocks rebuilt from the rules on the keyboard?')) return;

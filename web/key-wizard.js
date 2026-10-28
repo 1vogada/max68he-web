@@ -332,13 +332,39 @@
       if (!on) { clearInterval(timer); App.ui.closePicker(); return; }
       if (!gauge) { gauge = App.switchViz($('#kw-gauge')); bindGauge($('#kw-gauge')); }
       if (!W.draft) W.draft = blankDraft();
+      holdBarUi();
       render();
     },
     canLeave: () => !W.dirty || App.ui.confirmLeave(),
   };
 
+  // hold progress bar switch + colour (firmware options, caps 'holdBar'); saved at once
+  function holdBarUi() {
+    const box = $('#kw-holdbar'), o = App.st.fwOptions;
+    box.hidden = !(App.st.features ?? []).includes('holdBar') || !o;
+    if (box.hidden) return;
+    $('[name=kwHoldBar]', box).checked = o.holdBar !== false;
+    const hex = (c) => `#${c.map((v) => v.toString(16).padStart(2, '0')).join('')}`, esc = $('[name=kwHoldBarEscColor]', box);
+    $('[name=kwHoldBarColor]', box).value = hex(o.holdBarColor ?? [0, 255, 0]);
+    esc.hidden = !o.holdBarEscColor;
+    esc.value = hex(o.holdBarEscColor ?? [255, 0, 0]);
+  }
+  async function saveHoldBar() {
+    const box = $('#kw-holdbar');
+    try {
+      const r = await App.api('POST', '/api/fw-options', { holdBar: $('[name=kwHoldBar]', box).checked,
+        holdBarColor: $('[name=kwHoldBarColor]', box).value.slice(1),
+        ...(App.st.fwOptions?.holdBarEscColor ? { holdBarEscColor: $('[name=kwHoldBarEscColor]', box).value.slice(1) } : {}) });
+      App.st.fwOptions = r.fwOptions;
+      App.fillFirmware?.(r.fwOptions);
+    } catch (e) { App.toast(`Could not save the hold bar: ${e.message}`); }
+    holdBarUi();
+  }
+
   App.views.keyWizard = {
     init() {
+      $('#kw-holdbar').addEventListener('change', saveHoldBar);
+      window.addEventListener('statechange', holdBarUi);
       const panel = $('#kw-panel');
       tracker = App.ui.track(panel, {
         save,

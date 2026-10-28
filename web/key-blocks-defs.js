@@ -7,8 +7,14 @@
   const BOARD = '__board__';
   const COLOURS = {     // Scratch 3 category colours
     events: '#FFBF00', control: '#FFAB19', sensing: '#5CB1D6', operators: '#59C059',
-    keys: '#4C97FF', gamepad: '#9966FF', mouse: '#CF63CF', modes: '#FF8C1A',
+    keys: '#4C97FF', gamepad: '#9966FF', mouse: '#CF63CF', modes: '#FF8C1A', lights: '#FF6680',
   };
+  // the flash block's colours (Blockly 12 has no colour field in core): 'default' = green on the keyboard;
+  // a colour from the keyboard that is not in the list is added (allowColours)
+  const FLASH_COLOURS = [['green (default)', 'default'], ['red', '#ff0000'], ['orange', '#ff8000'], ['yellow', '#ffff00'], ['cyan', '#00ffff'],
+    ['blue', '#0000ff'], ['magenta', '#ff00ff'], ['white', '#ffffff'], ['dim white', '#404040']];
+  const extraColours = new Set();
+  const colourOptions = () => [...FLASH_COLOURS, ...[...extraColours].filter((c) => !FLASH_COLOURS.some(([, v]) => v === c)).map((c) => [c, c])];
   const EXTRA_KEYS = ['Space', 'Enter', 'Tab', 'Bksp', 'Esc', 'Del', 'Ins', 'Home', 'End', 'PgUp', 'PgDn', 'Up', 'Down', 'Left', 'Right',
     ...Array.from({ length: 12 }, (_, i) => `F${i + 1}`), 'LCtrl', 'LShift', 'LAlt', 'LWin', 'RCtrl', 'RShift', 'RAlt', 'RWin', 'PrtSc', 'Menu'];
   const FIRST = ['Fn', 'LCtrl', 'LShift', 'LAlt', 'LWin', 'RCtrl', 'RShift', 'RAlt'];
@@ -74,6 +80,7 @@
     ['kb_wheel', 'mouse', 'scroll wheel %1 notches', [numF('N', 1, -127, 127)], 'stack'],
     ['kb_mode', 'modes', '%1 mode %2', [dd('OP', [['enter', 'enter'], ['leave', 'leave'], ['toggle', 'toggle'], ['enter while held', 'hold']]), modeF()], 'stack'],
     ['kb_leave_all', 'modes', 'leave every mode', [], 'stack'],
+    ['kb_flash', 'lights', 'flash the hold bar %1 times in %2', [numF('TIMES', 3, 1, 15, 1), { type: 'field_dropdown', name: 'COLOR', options: colourOptions }], 'stack'],
     ['kb_remap', 'modes', 'in mode %1 : %2 acts as %3', [modeF(), keyF(), { type: 'field_dropdown', name: 'TARGET', options: remapTargets }], 'remap'],
     ['kb_raw', 'keys', 'rule from the keyboard: %1', [{ type: 'field_label_serializable', name: 'TEXT', text: '' }], 'stack'],
   ];
@@ -88,6 +95,7 @@
     kb_remap: 'While the mode is on, this key does something else.',
     kb_mouse_keys: 'Keeps moving while on, speeding up from the first speed to the second over the ramp time, along the curve. Pointer px/s (10 to 2550), wheel notches/s (0.1 to 25.5). "Share speed": all directions use one speed, so turning (or adding a second arrow) keeps the speed you built up; "keep speed" holds it this long after you let go, for quick taps between directions (0 = start over at once). Sharing needs the newest open firmware. "Speed by pressure": the deeper you press, the faster (nothing above "from", full speed at "to"); the ramp, sharing and keep do nothing then. "Both": the depth sets how fast it can go, the ramp builds up to that. Pressure needs firmware with key action engine 4.',
     kb_raw: 'A rule from the keyboard that no other block shows exactly. It is saved back as it is.',
+    kb_flash: 'Home, Del, PgUp, PgDn and Right flash 1 to 15 times in this colour, once each time the block runs. Needs the newest open firmware (feature "modeFlash"). A mode turning on / off has its own flash: see the Modes tab.',
   };
 
   // the mouse-keys speed curve as a tiny picture on its block (x = time, or depth with speed by pressure)
@@ -139,8 +147,10 @@
   }
   // names that came from the keyboard or a saved workspace stay pickable
   const allowKeys = (names) => names.forEach((n) => n && extra.add(n));
+  const allowColours = (list) => list.forEach((c) => typeof c === 'string' && /^#[0-9a-f]{6}$/.test(c) && extraColours.add(c));
 
-  function toolbox(modes) {
+  // flash: the keyboard has caps 'modeFlash' (the Lights category only then)
+  function toolbox(modes, { flash = false } = {}) {
     const b = (type, fields) => ({ kind: 'block', type, ...(fields && { fields }) });
     const named = modes.filter((m) => m.name);
     const first = named[0] ? String(named[0].id) : '1';
@@ -159,6 +169,7 @@
           ...(named.length ? [{ kind: 'button', text: 'Rename a mode', callbackKey: 'kbRenameMode' },
             b('kb_mode', { OP: 'enter', MODE: first }), b('kb_mode', { OP: 'leave', MODE: first }), b('kb_mode', { OP: 'toggle', MODE: first }), b('kb_leave_all'),
             { kind: 'label', text: 'Key bindings in a mode' }, b('kb_remap', { MODE: first, KEY: 'RShift', TARGET: 'mouse:L' })] : [{ kind: 'label', text: 'Make a mode first (up to 3).' }])] },
+        ...(flash ? [{ kind: 'category', name: 'Lights', colour: COLOURS.lights, contents: [b('kb_flash', { TIMES: 3, COLOR: 'default' })] }] : []),
       ],
     };
   }
@@ -182,5 +193,5 @@
     });
   }
 
-  App.kbDefs = { install, toolbox, theme, plotUri, allowKeys, BOARD, COLOURS };
+  App.kbDefs = { install, toolbox, theme, plotUri, allowKeys, allowColours, BOARD, COLOURS };
 })();

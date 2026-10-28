@@ -29,15 +29,15 @@ test('protocol: INFO v2, COND / MODE packets, condition nibble, mode names in UT
   const cs = P.kaCondSetPacket(1, [65, 5, 0xff, 0]);
   assert.deepStrictEqual([...cs.slice(0, 3), ...cs.slice(8, 12)], [0xee, 5, 1, 65, 5, 0xff, 0]);
   assert.strictEqual(cs[7], P.checksum(cs, 7));
-  assert.throws(() => P.kaCondGetPacket(0), /1..15/);
-  assert.throws(() => P.kaCondSetPacket(16, [0, 0, 0, 0]), /1..15/);
+  assert.throws(() => P.kaCondGetPacket(0), /1..255/);
+  assert.throws(() => P.kaCondSetPacket(256, [0, 0, 0, 0]), /1..255/);
   assert.deepStrictEqual(P.kaModeGetPacket(3).slice(0, 3), [0xee, 6, 3]);
   const ms = P.kaModeSetPacket(1, 'Mäus');
   assert.deepStrictEqual(ms.slice(0, 3), [0xee, 7, 1]);
   assert.deepStrictEqual(ms.slice(8, 24), [0x4d, 0xc3, 0xa4, 0x75, 0x73, ...new Array(11).fill(0)]);
   assert.strictEqual(P.decodeModeName(ms.slice(8, 24)), 'Mäus');
   assert.throws(() => P.kaModeSetPacket(1, 'x'.repeat(17)), /at most 16 bytes/);
-  assert.throws(() => P.kaModeSetPacket(4, 'x'), /1..3/);
+  assert.throws(() => P.kaModeSetPacket(33, 'x'), /1..32/);
   const r = P.encodeKaRecord({ slot: 1, rules: [{ trigger: 5, cond: 2, mode: 1, tval: 0, output: 5, a: 1 }] });
   assert.strictEqual(r[8], 0x25);
   assert.deepStrictEqual(P.decodeKaRecord(r).rules[0].trigger, 5);
@@ -263,10 +263,10 @@ test('modes and conditions: bytes, defaults and every refusal', () => {
   r({ held: ['Fn', 'fn'] }, /held names a key twice/);
   r({ held: ['LCtrl', 'Ctrl'] }, /held names a key twice/);
   r({ held: ['w'] }, /a key can not be in the condition of its own rule/);
-  r({ mode: 4 }, /a mode number is 1..3, not 4/);
-  r({ mode: [] }, /mode is a mode \(name or 1..3\) or a list of 1..3 modes/);
+  r({ mode: 33 }, /a mode number is 1..32, not 33/);
+  r({ mode: [] }, /mode is a mode \(name or 1..32\) or a list of modes/);
   r({ mode: [1, 1] }, /mode names a mode twice/);
-  r({ mode: '' }, /mode is a mode name or 1..3/);
+  r({ mode: '' }, /mode is a mode name or 1..32/);
   r({ mode: 'Mouse', notMode: 'mouse' }, /both mode and notMode/);
   const d = (x, re, mode) => badRule({ when: 'press', ...(mode && { mode }), do: x }, re);
   d({ mode: 1 }, /action is enter, leave, toggle/);
@@ -458,4 +458,67 @@ test('REST: batch and modes check shapes before the keyboard; GET adds modes and
   assert.ok(t.get_modes && t.set_mode_name);
   assert.ok(t.set_key_actions.inputSchema.safeParse(EXAMPLE).success);
   assert.match(t.set_key_actions.description, /mouseKeys/);
+});
+
+test('flash rule (output 11): [trigger, TIMES, tval, 11, R, G, B], defaults, every refusal', () => {
+  assert.deepStrictEqual(rule8({ when: 'press', do: { flash: [255, 0, 255], times: 5 } }), [0x05, 5, 0, 0, 0x0b, 0xff, 0x00, 0xff], 'the firmware doc example');
+  assert.deepStrictEqual(rule8({ when: 'hold', ms: 300, do: { flash: true } }), [3, 3, 44, 1, 11, 0, 0, 0], 'true = green (0,0,0), default 3 times');
+  assert.deepStrictEqual(rule8({ when: 'tap', ms: 200, do: { flash: '#010203', times: 15 } }), [4, 15, 200, 0, 11, 1, 2, 3]);
+  assert.deepStrictEqual(rule8({ when: 'down', at: 1.5, do: { flash: 'FF8000', times: 1 } }), [1, 1, 150, 0, 11, 255, 128, 0], 'any trigger, its tval');
+  assert.deepStrictEqual(rule8({ when: 'release', if: { mode: 1 }, do: { flash: [0, 0, 255], times: 2 } }), [0x16, 2, 0, 0, 11, 0, 0, 255], 'condition nibble');
+  for (const [d, re] of [[{ flash: true, times: 0 }, /times is a whole number within 1..15/], [{ flash: true, times: 16 }, /times is a whole number within 1..15/],
+    [{ flash: true, times: 2.5 }, /times/], [{ flash: [0, 0, 0] }, /black \(0, 0, 0\) can't flash.*flash: true/], [{ flash: '#000000' }, /black/],
+    [{ flash: 'cyan' }, /flash is true \(the default green\), \[r, g, b\]/], [{ flash: [1, 2] }, /flash is true/], [{ flash: false }, /flash is true/],
+    [{ flash: true, color: 'x' }, /unknown field "color"/]]) {
+    badRule({ when: 'press', do: d }, re);
+  }
+  badRule({ when: 'press', mode: 'tap', do: { flash: true } }, /a flash has no mode/);
+  badRule({ when: 'hold', ms: 5, do: { flash: true } }, /ms is a whole number within 10..10000/);
+  assert.ok(K.usesFlash(K.parseSpec({ key: 'W', rules: [{ when: 'press', do: { flash: true } }] })));
+  assert.ok(!K.usesModes(K.parseSpec({ key: 'W', rules: [{ when: 'press', do: { flash: true } }] })), 'not an engine 2 output');
+});
+
+test('flash rule decode: output 11 is never a mode (its mode byte is the count); round trip', () => {
+  const rec = (rules) => P.encodeKaRecord({ slot: 14, rules });
+  // mode byte 1..5 would read as press / release / tap / toggle / while, and a, b as a mode reference (output 10)
+  for (const times of [1, 2, 3, 4, 5, 15]) {
+    const r = K.fromRecord(rec([{ trigger: 5, mode: times, tval: 0, output: 11, a: 1, b: 3, c: 0 }]), 'W').rules[0];
+    assert.deepStrictEqual(r, { when: 'press', do: { flash: '#010300', times } }, `times ${times}`);
+    assert.ok(!('mode' in r) && !('action' in r.do));
+  }
+  const ten = K.fromRecord(rec([{ trigger: 5, mode: 1, tval: 0, output: 10, a: 1, b: 3, c: 0 }]), 'W').rules[0];
+  assert.deepStrictEqual(ten.do, { mode: 1, action: 'toggle' }, 'output 10 still reads as a mode change');
+  const green = K.fromRecord(rec([{ trigger: 3, mode: 2, tval: 500, output: 11, a: 0, b: 0, c: 0 }]), 'W');
+  assert.deepStrictEqual(green.rules[0], { when: 'hold', ms: 500, do: { flash: true, times: 2 } });
+  assert.deepStrictEqual(green.summary, ['Hold 0.50 s: flash the hold bar column 2 times']);
+  // a DEPTH rule whose output byte (pressFrom 1.1 mm) is 11 stays a mouse keys rule
+  const mk = K.parseSpec({ key: 'W', rules: [MK({ speedBy: 'pressure', pressFrom: 1.1 })] });
+  assert.ok(!K.usesFlash(mk) && mk.rules[2].output === 11);
+  assert.strictEqual(K.fromRecord(K.toRecord(mk, 14), 'W').rules[0].do.pressFrom, 1.1);
+  // JSON -> record -> JSON -> record: the same bytes
+  const spec = { key: 'W', rules: [{ when: 'press', do: { flash: [255, 0, 255], times: 5 } }, { when: 'hold', ms: 300, if: { mode: 2 }, do: { flash: true, times: 1 } },
+    { when: 'tap', ms: 200, do: { flash: '#00ff00' } }] };
+  const bytes = K.toRecord(K.parseSpec(spec), 14, () => 1);
+  const back = K.fromRecord(bytes, 'W', { conds: [[0xff, 0xff, 0xff, 0x02]] });
+  assert.deepStrictEqual(back.rules.map((r) => r.do), [{ flash: '#ff00ff', times: 5 }, { flash: true, times: 1 }, { flash: '#00ff00', times: 3 }]);
+  assert.deepStrictEqual(K.toRecord(K.parseSpec(back), 14, () => 1), bytes);
+  assert.deepStrictEqual(K.preview(spec).rules[2], { when: 'tap', ms: 200, do: { flash: '#00ff00', times: 3 } });
+});
+
+test('flash rule: only to firmware with caps modeFlash (word 3 bit 9), refused before anything is written', async () => {
+  const map = { key: 'W', rules: [{ when: 'press', do: { flash: [255, 0, 255], times: 5 } }] };
+  for (const caps3 of [0, 0xc100, 0x0200]) {
+    const f = v2({ engine: 5, caps3 });
+    await assert.rejects(f.kb.setKeyActions(map), (e) => e.status === 400 && /A flash \(do: \{ flash \}\) needs a newer open firmware \(feature "modeFlash"\)/.test(e.message));
+    await assert.rejects(f.kb.setKeyActionsBatch({ maps: [{ key: 'A', rules: [{ when: 'press', do: { key: 'B' } }] }, map] }), /modeFlash/);
+    assert.deepStrictEqual(writes(f), [], `caps3 ${caps3.toString(16)}: nothing written`);
+  }
+  const f = v2({ engine: 5, caps3: 0xc300 });
+  const stored = await f.kb.setKeyActions(map);
+  assert.deepStrictEqual(stored.rules, [{ when: 'press', do: { flash: '#ff00ff', times: 5 } }]);
+  assert.deepStrictEqual(f.table.get(14).slice(8, 16), [5, 5, 0, 0, 11, 255, 0, 255]);
+  assert.deepStrictEqual((await f.kb.getKeyActions('W')).rules, stored.rules, 'read back');
+  // the engine is not what decides: engine 1 firmware with the caps bit takes a flash
+  const e1 = fakeKeyboard({ keys: MAX68HE_KEYS, caps3: 0x8200 });
+  assert.deepStrictEqual((await e1.kb.setKeyActions(map)).rules[0].do, { flash: '#ff00ff', times: 5 });
 });

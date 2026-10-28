@@ -5,6 +5,17 @@
   {
    "board": 2755,
    "model": "MAX68HE",
+   "file": "x68max-2755-8d21c3d.bin",
+   "commit": "8d21c3d542f3010115b3fb79c269c94e11f66523",
+   "committedAt": "2026-10-28T17:21:24+01:00",
+   "builtAt": "2026-10-28T23:37:54.718Z",
+   "size": 119936,
+   "sha256": "6f7ee6cab19f57b3372593d53de2d3050c2cbd9678835791275925660ffe88b8",
+   "notes": "Key action pool: the keyboard's one table image is carved once and re-used when the state is reset (each config load / reset carved a new one, so the pool ran out at boot and the table had no records)"
+  },
+  {
+   "board": 2755,
+   "model": "MAX68HE",
    "file": "x68max-2755-22d9af2.bin",
    "commit": "22d9af2209d1ea4742d50eea8150ed67625b4f4c",
    "committedAt": "2026-10-28T13:04:04+01:00",

@@ -10,13 +10,18 @@
 // shareSpeed / keepMs (engine 3): the ARG rule's mode byte = keepMs / 10, c bit 0 = shared speed.
 // speedBy 'pressure' | 'both' (engine 4): ARG c bits 1..2 = 1 | 2, and a DEPTH rule follows the ARG rule:
 // [0x0F, 0, 0, 0, FROM, TO, 0, 0] (output = pressFrom, a = pressTo, in 0.1 mm), so 3 rule slots.
+// do: { flash: true | [r, g, b] | '#rrggbb', times?: 1..15 (3) } (caps 'modeFlash', any engine): the hold bar
+// column flashes `times` times in that colour (true = the default green). Output 11; the rule's mode byte is
+// the count, so a flash rule has no `mode` and output 11 never reads as a mode change. Black can't flash
+// (0,0,0 is the default green on the wire): it is refused, and 0,0,0 reads back as flash: true.
 const P = require('./protocol');
 const { CURVE_IDS, CURVE_NAMES, DEFAULT_POWER } = require('../web/glide-core');
 const C = require('../web/key-actions-core');
 
 const fail = (where, msg) => Object.assign(new Error(where ? `${where}: ${msg}` : msg), { status: 400 });
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
-const OUT = { MOUSE_KEYS: 9, MODE: 10 };
+const OUT = { MOUSE_KEYS: 9, MODE: 10, FLASH: P.KA.FLASH };
+const FLASH_TIMES = 3;   // a flash rule's default count (like a mode's enter flash)
 const DIRS = ['up', 'down', 'left', 'right', 'wheelUp', 'wheelDown'];   // wire a = index + 1
 const ACTIONS = ['enter', 'leave', 'toggle'];                              // wire b = index + 1
 const CURVES = CURVE_NAMES.filter((n) => n !== 'points');
@@ -32,9 +37,29 @@ function newKind(d) {
   if (!isObj(d)) return null;
   if ('mouseKeys' in d) return 'mouseKeys';
   if ('leaveAllModes' in d) return 'leaveAllModes';
+  if ('flash' in d) return 'flash';
   if ('mode' in d) return 'mode';
   return null;
 }
+
+// a flash colour: true (default green -> 0,0,0), [r, g, b] or '#rrggbb' / 'rrggbb'; black refused
+function flashColor(v, w) {
+  if (v === true) return [0, 0, 0];
+  let c = null;
+  if (Array.isArray(v) && v.length === 3 && v.every((x) => Number.isInteger(x) && x >= 0 && x <= 255)) c = [...v];
+  else if (typeof v === 'string' && /^#?[0-9a-f]{6}$/i.test(v.trim())) {
+    const n = parseInt(v.trim().replace('#', ''), 16);
+    c = [n >> 16, (n >> 8) & 0xff, n & 0xff];
+  }
+  if (!c) throw fail(w, 'flash is true (the default green), [r, g, b] (0..255 each) or "#rrggbb"');
+  if (!c.some(Boolean)) throw fail(w, `flash: ${P.BLACK_FLASH}; use flash: true for the default green`);
+  return c;
+}
+const hex = (c) => `#${c.map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+// a wire rule that is a FLASH (ARG / DEPTH rules are not outputs: a DEPTH rule's output byte is a depth)
+const isFlashRule = (x) => x.output === OUT.FLASH && x.trigger !== P.KA.ARG;
+// true when a wire rule list has a FLASH rule (needs caps 'modeFlash')
+const usesFlash = (wire) => wire.rules.some(isFlashRule);
 
 // ---- conditions -----------------------------------------------------------------------
 
@@ -47,11 +72,12 @@ const same = (a, b) => (typeof a === 'string' && typeof b === 'string' ? a.toLow
 
 function modeRefs(v, what, where, ctx) {
   const list = Array.isArray(v) ? v : [v];
-  if (!list.length || list.length > P.KA.MODES) throw fail(where, `${what} is a mode (name or 1..3) or a list of 1..3 modes`);
+  const N = P.KA.MAX_MODES;
+  if (!list.length || list.length > N) throw fail(where, `${what} is a mode (name or 1..${N}) or a list of modes`);
   const out = list.map((m) => {
     if (typeof m === 'number') {
-      if (!Number.isInteger(m) || m < 1 || m > P.KA.MODES) throw fail(where, `${what}: a mode number is 1..3, not ${m}`);
-    } else if (typeof m !== 'string' || !m.trim()) throw fail(where, `${what} is a mode name or 1..3`);
+      if (!Number.isInteger(m) || m < 1 || m > N) throw fail(where, `${what}: a mode number is 1..${N}, not ${m}`);
+    } else if (typeof m !== 'string' || !m.trim()) throw fail(where, `${what} is a mode name or 1..${N}`);
     return ctx.modeOf(typeof m === 'string' ? m.trim() : m, where);
   });
   if (out.some((m, i) => out.findIndex((x) => same(x, m)) !== i)) throw fail(where, `${what} names a mode twice`);
@@ -92,35 +118,54 @@ function parseIf(c, where, ctx = LOOSE, self) {
 
 const NOT = 0x80;   // entry key byte bit 7: the key must not be held (engine 5)
 const resolved = (need) => [...need.keys, ...(need.notKeys ?? [])].every(Number.isInteger) && [...need.on, ...need.off].every(Number.isInteger);
-// { keys: [slots], notKeys: [slots], on: [ids], off: [ids] } -> the 4-byte entry
+// { keys: [slots], notKeys: [slots], on: [ids], off: [ids] } -> the entry: 4 bytes when its modes are 1..3
+// (every engine), else 12 ([k0, k1, k2, byte 3, on u32, off u32], modes 4..32: engine 6)
 function condEntry(need) {
   if (!resolved(need)) throw new Error('condition keys and modes are not resolved to slots and ids');
-  const mask = (ids) => ids.reduce((m, id) => m | (1 << (id - 1)), 0);
-  return [...need.keys, ...(need.notKeys ?? []).map((s) => s | NOT), 0xff, 0xff, 0xff].slice(0, 3).concat(mask(need.on) | (mask(need.off) << 4));
+  const mask = (ids) => ids.reduce((m, id) => (m | (1 << (id - 1))) >>> 0, 0);
+  const on = mask(need.on), off = mask(need.off);
+  const keys = [...need.keys, ...(need.notKeys ?? []).map((s) => s | NOT), 0xff, 0xff, 0xff].slice(0, 3);
+  const le = (v) => [v & 0xff, (v >>> 8) & 0xff, (v >>> 16) & 0xff, (v >>> 24) & 0xff];
+  return P.compactCond([...keys, 0, ...le(on), ...le(off)]);
 }
 // true when a wire rule list has a notHeld condition (needs engine 5)
 const usesNotHeld = (wire) => wire.rules.some((x) => x.need?.notKeys?.length);
-const isFree = (e) => e.join() === P.KA_COND_FREE.join();
-// the same condition: the same keys in any order and the same mode bits
-const sameEntry = (a, b) => a[3] === b[3] && [...a.slice(0, 3)].sort().join() === [...b.slice(0, 3)].sort().join();
+// an entry's mode masks (4- or 12-byte form)
+function masksOf(e) {
+  const w = P.wideCond(e);
+  const u32 = (i) => (w[i] | (w[i + 1] << 8) | (w[i + 2] << 16) | (w[i + 3] << 24)) >>> 0;
+  return { on: u32(4), off: u32(8) };
+}
+const isFree = (e) => e.slice(0, 3).every((k) => k === 0xff) && !masksOf(e).on && !masksOf(e).off;
+// the same condition: the same keys in any order and the same modes
+const sameEntry = (a, b) => {
+  const x = masksOf(a), y = masksOf(b);
+  return x.on === y.on && x.off === y.off && [...a.slice(0, 3)].sort().join() === [...b.slice(0, 3)].sort().join();
+};
+// true when a wire rule list names a mode above 3 (in `if` or a mode output): needs engine 6
+const usesHighModes = (wire) => wire.rules.some((x) => [...(x.need?.on ?? []), ...(x.need?.off ?? [])].some((m) => Number.isInteger(m) && m > P.KA.MODES) ||
+  (x.output === OUT.MODE && x.trigger !== P.KA.ARG && x.a > P.KA.MODES));
 
 // a stored entry -> { keys, on, off } (null for an unused / malformed one)
 function needOf(e) {
-  if (!Array.isArray(e) || e.length !== 4 || isFree(e)) return null;
-  const ids = (bits) => [1, 2, 3].filter((id) => bits & (1 << (id - 1)));
+  if (!Array.isArray(e) || (e.length !== 4 && e.length !== P.KA.COND_BYTES) || isFree(e)) return null;
+  const ids = (bits) => Array.from({ length: P.KA.MAX_MODES }, (_, i) => i + 1).filter((id) => (bits >>> (id - 1)) & 1);
   const used = e.slice(0, 3).filter((k) => k !== 0xff);
   const not = used.filter((k) => k & NOT).map((k) => k & ~NOT);
-  return { keys: used.filter((k) => !(k & NOT)), ...(not.length && { notKeys: not }), on: ids(e[3] & 0x0f), off: ids(e[3] >> 4) };
+  const { on, off } = masksOf(e);
+  return { keys: used.filter((k) => !(k & NOT)), ...(not.length && { notKeys: not }), on: ids(on), off: ids(off) };
 }
-// Firmware rule for an entry: used keys first, distinct slots (bit 7 = not held, engine 5); bits 3 and 7 zero; a key or a mode bit.
+// Firmware rule for an entry: used keys first, distinct slots (bit 7 = not held, engine 5); a key or a mode.
+// 4 bytes: byte 3 = on bits 0..2 | off bits 4..6 (bits 3 and 7 zero); 12 bytes: the masks (modes 1..32).
 function entryProblem(e) {
-  if (!Array.isArray(e) || e.length !== 4 || !e.every((v) => Number.isInteger(v) && v >= 0 && v <= 255)) return 'an entry is 4 bytes';
+  if (!Array.isArray(e) || (e.length !== 4 && e.length !== P.KA.COND_BYTES) || !e.every((v) => Number.isInteger(v) && v >= 0 && v <= 255)) return 'an entry is 4 or 12 bytes';
   if (isFree(e)) return null;
   const keys = e.slice(0, 3), used = keys.filter((k) => k !== 0xff);
   if (keys.slice(used.length).some((k) => k !== 0xff)) return 'used keys come first';
   if (new Set(used.map((k) => k & ~NOT)).size !== used.length) return 'keys are distinct slots 0..127 (bit 7 = not held)';
   if (e[3] & 0x88) return 'mode bits 3 and 7 are 0';
-  if (!used.length && !e[3]) return 'no key and no mode';
+  const { on, off } = masksOf(e);
+  if (!used.length && !on && !off) return 'no key and no mode';
   return null;
 }
 
@@ -147,6 +192,13 @@ function parseNewOutput(d, kind, w, ctx = LOOSE) {
     const bad = Object.keys(d).filter((k) => !fields.includes(k));
     if (bad.length) throw fail(w, `unknown field${bad.length > 1 ? 's' : ''} ${bad.map((b) => `"${b}"`).join(', ')}`);
   };
+  if (kind === 'flash') {
+    only(['flash', 'times']);
+    const times = d.times ?? FLASH_TIMES;
+    if (!Number.isInteger(times) || times < 1 || times > P.KA.FLASH_MAX) throw fail(w, `times is a whole number within 1..${P.KA.FLASH_MAX}`);
+    const [a, b, c] = flashColor(d.flash, w);
+    return { output: OUT.FLASH, a, b, c, times };
+  }
   if (kind === 'leaveAllModes') {
     only(['leaveAllModes']);
     if (d.leaveAllModes !== true) throw fail(w, 'leaveAllModes is true');
@@ -155,7 +207,7 @@ function parseNewOutput(d, kind, w, ctx = LOOSE) {
   if (kind === 'mode') {
     only(['mode', 'action']);
     const [id] = modeRefs(d.mode, 'mode', w, ctx);
-    if (Array.isArray(d.mode)) throw fail(w, 'mode is one mode (name or 1..3); every mode: { leaveAllModes: true }');
+    if (Array.isArray(d.mode)) throw fail(w, `mode is one mode (name or 1..${P.KA.MAX_MODES}); every mode: { leaveAllModes: true }`);
     const b = ACTIONS.indexOf(d.action);
     if (b < 0) throw fail(w, `action is ${ACTIONS.join(', ')}`);
     return { output: OUT.MODE, a: id, b: b + 1, c: 0 };
@@ -211,6 +263,10 @@ function newDefaultMode(when, kind, d) {
 const i16 = (lo, hi) => ((lo | (hi << 8)) << 16) >> 16;
 // wire output (+ its ARG rule and DEPTH rule) -> the JSON do; null when not an engine-2 output
 function newDo(x, arg, ctx = {}, depth = null) {
+  if (isFlashRule(x)) {   // the mode byte is the count: never a mode
+    const c = [x.a, x.b, x.c];
+    return { flash: c.some(Boolean) ? hex(c) : true, times: x.mode };
+  }
   if (x.output === OUT.MODE) {
     if (x.a === 0 && x.b === 2) return { leaveAllModes: true };
     const id = x.a;
@@ -274,8 +330,14 @@ function triggerText(r, mode) {
   }
 }
 
+function flashText(d) {
+  const n = d.times ?? FLASH_TIMES;
+  return `flash the hold bar column ${n} time${n === 1 ? '' : 's'}${d.flash === true || d.flash === undefined ? '' : ` in ${Array.isArray(d.flash) ? hex(d.flash) : d.flash}`}`;
+}
+
 function doText(d) {
   const kind = newKind(d);
+  if (kind === 'flash') return flashText(d);
   if (kind === 'leaveAllModes') return 'leave every mode';
   if (kind === 'mode') return `${d.action} ${modeText(d.mode)}`;
   if (kind === 'mouseKeys') {
@@ -306,8 +368,8 @@ function doText(d) {
 
 function newRuleText(r) {
   const kind = newKind(r.do) ?? C.outputKind(r.do);
-  const mode = r.mode ?? (newKind(r.do) ? newDefaultMode(r.when, kind, r.do) : C.defaultMode(r));
-  const once = kind === 'mode' || kind === 'leaveAllModes' || C.ONCE.includes(kind);
+  const mode = kind === 'flash' ? 'press' : r.mode ?? (newKind(r.do) ? newDefaultMode(r.when, kind, r.do) : C.defaultMode(r));
+  const once = kind === 'mode' || kind === 'leaveAllModes' || kind === 'flash' || C.ONCE.includes(kind);
   let action = doText(r.do);
   if (kind === 'mode' && mode === 'while') action += ' (only while it lasts)';
   else if (!once) {
@@ -327,5 +389,5 @@ function summary(spec) {
   return out;
 }
 
-module.exports = { OUT, DIRS, ACTIONS, CURVES, MK_DEFAULTS, SPEED_BY, LOOSE, mkTail, speedByPressure, usesNotHeld, newKind, parseIf, condEntry, needOf, entryProblem,
-  isFree, sameEntry, ifJson, parseNewOutput, newModes, newDefaultMode, newDo, sharesSpeed, newRuleText, summary, resolved };
+module.exports = { OUT, FLASH_TIMES, flashColor, flashText, isFlashRule, usesFlash, DIRS, ACTIONS, CURVES, MK_DEFAULTS, SPEED_BY, LOOSE, mkTail, speedByPressure, usesNotHeld, newKind, parseIf, condEntry, needOf, entryProblem,
+  isFree, sameEntry, masksOf, usesHighModes, ifJson, parseNewOutput, newModes, newDefaultMode, newDo, sharesSpeed, newRuleText, summary, resolved };

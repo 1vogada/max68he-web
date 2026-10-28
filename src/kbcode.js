@@ -42,14 +42,15 @@ async function readState(k) {
   const open = Boolean(info.custom);
   const caps = open ? await k.getCaps() : null;
   const features = caps ? [...caps.features] : [];
-  let engine = 0, entries = 0, modes = null;
+  let engine = 0, entries = 0, modes = null, conditions = 0;
   if (features.includes('keyActions')) {
     const ka = await k.keyActionsInfo();
     engine = ka.engine;
     entries = ka.entries;
+    conditions = ka.conditions;
     if (engine >= 2) modes = (await k.getModes()).map(({ id, name }) => ({ id, name }));
   }
-  return { model: info.model ?? 'max68he', open, features, hostApi: caps?.api ?? 0, engine, entries,
+  return { model: info.model ?? 'max68he', open, features, hostApi: caps?.api ?? 0, engine, entries, conditions,
     openModes: open ? Object.keys(P.openModesFor(caps)).map(Number) : [], modes, profile: await k.getProfile(), unitMm: info.unitMm };
 }
 
@@ -184,7 +185,8 @@ async function write(k, { writes: w, changes }, applied, onStep) {
   if (w.options) { onStep('options'); await k.setOptions(w.options); }
   if (w.pollingRateHz) { onStep('polling rate'); await k.setReportRate(w.pollingRateHz); }
   if (w.fwOptions) { onStep('firmware options'); await k.setFirmwareOptions(w.fwOptions); }
-  if (w.options || w.pollingRateHz || w.fwOptions) done('options');
+  for (const { mode, ...f } of w.modeFlash ?? []) { onStep(`mode ${mode} flash`); await k.setModeFlash(mode, f); }
+  if (w.options || w.pollingRateHz || w.fwOptions || w.modeFlash) done('options');
   if (w.gamepad) { onStep('gamepad'); await k.setBoardGamepad(w.gamepad); done('gamepad'); }
   if (w.keyActions) {
     onStep('key action maps');

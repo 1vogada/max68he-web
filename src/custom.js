@@ -33,7 +33,12 @@ module.exports = {
   // ---- open-firmware options (0xFE) -------------------------------------------
   // { capsIndicator, capsColor: [r,g,b], snapMode: last|neutral|first|deeper, statusGuide,
   //   idleMinutes (0 = never), layerIndicator, fnHold, unicode, perf, textTyping: keep|block|stop,
-  //   compatMode (6KRO boot keyboard), releaseDebounceMs 0..10, dimMinutes (0 = never), dimPercent 0..100 }
+  //   compatMode (6KRO boot keyboard), releaseDebounceMs 0..10, dimMinutes (0 = never), dimPercent 0..100,
+  //   holdBar (hold progress bar on), holdBarColor: [r,g,b] (default green),
+  //   holdBarEscColor: [r,g,b] (default red; left out by firmware before it),
+  //   modeFlash: [{ mode: 1..3, enter, enterColor, leave, leaveColor }] (the hold bar column flashes 3x when
+  //   a key action mode turns on, 1x when it turns off; default on, green / dim white #404040; left out by
+  //   firmware before it). A write's modeFlash lists only the modes (and fields) that change. }
   async getFirmwareOptions() {
     this._requireCustom();
     return P.parseFwOptions(await this.t.query(P.fwOptionsGetPacket()));
@@ -41,10 +46,20 @@ module.exports = {
 
   async setFirmwareOptions(changes) {
     this._requireCustom();
-    const next = { ...(await this.getFirmwareOptions()), ...changes };
+    const cur = await this.getFirmwareOptions();
+    if (changes.holdBarEscColor !== undefined && !cur.holdBarEscColor) {
+      throw Object.assign(new Error('Hold bar Esc colour needs a newer open firmware'), { status: 400 });
+    }
+    const has = (await this.getCaps()).features;
+    const next = { ...cur, ...changes };
+    // mode flash (bytes 24..43): only to firmware that reports 'modeFlash' and answers 44 option bytes;
+    // read-modify-write per mode. Without changes, what was read goes back as it was (24-byte firmware: nothing).
+    if (changes.modeFlash !== undefined) {
+      if (!has.includes('modeFlash') || !cur.modeFlash) throw Object.assign(new Error(P.MODE_FLASH_NEEDS), { status: 400 });
+      try { next.modeFlash = P.mergeModeFlash(cur.modeFlash, changes.modeFlash); } catch (e) { throw Object.assign(e, { status: 400 }); }
+    }
     // bytes 11..15 are reserved on older open firmware: a non-default value goes only to firmware that has
     // the option (CAPS2 bit), otherwise the byte is sent as 0
-    const has = (await this.getCaps()).features;
     for (const [feature, key, off, label] of [
       ['textTyping', 'textTyping', 'keep', '"While a text is typing"'],
       ['compatMode', 'compatMode', false, 'Compatibility mode'],
@@ -54,6 +69,12 @@ module.exports = {
       if (has.includes(feature)) continue;
       if ((changes[key] ?? off) !== off) throw Object.assign(new Error(`${label} needs a newer open firmware`), { status: 400 });
       next[key] = off;
+    }
+    if (!has.includes('holdBar')) {   // bytes 16..19: firmware without the hold bar ignores them
+      if (changes.holdBar === false || changes.holdBarColor !== undefined) {
+        throw Object.assign(new Error('Hold progress bar needs a newer open firmware'), { status: 400 });
+      }
+      next.holdBar = true; next.holdBarColor = [...P.HOLD_BAR_DEFAULT_COLOR];
     }
     return P.parseFwOptions(await this.t.query(P.fwOptionsPacket(next)));
   },

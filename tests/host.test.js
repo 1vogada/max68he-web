@@ -88,7 +88,8 @@ test('firmware options: packet layout, parse, validation', () => {
   assert.deepStrictEqual(p.slice(8, 16), [1, 255, 0, 16, 1, 0, 5, 1]);
   assert.strictEqual(p[7], P.checksum(p, 7));
   assert.deepStrictEqual(P.parseFwOptions(p), { capsIndicator: true, capsColor: [255, 0, 16], snapMode: 'neutral', statusGuide: false, idleMinutes: 5, layerIndicator: true, fnHold: false, unicode: 'windows', perf: false, textTyping: 'keep',
-    compatMode: false, releaseDebounceMs: 0, dimMinutes: 0, dimPercent: 30 });
+    compatMode: false, releaseDebounceMs: 0, dimMinutes: 0, dimPercent: 30, holdBar: true, holdBarColor: [0, 255, 0], holdBarEscColor: [255, 0, 0],
+    modeFlash: [1, 2, 3].map((mode) => ({ mode, enter: true, enterColor: [0, 255, 0], leave: true, leaveColor: [64, 64, 64] })) });
   assert.throws(() => P.fwOptionsPacket({ snapMode: 'both', idleMinutes: 0 }));
   const h = P.fwOptionsPacket({ capsIndicator: false, snapMode: 'last', idleMinutes: 0, fnHold: true });
   assert.strictEqual(h[16], 1, 'fnHold is options byte 8');
@@ -154,6 +155,150 @@ test('firmware options round 5: each new option only goes to firmware that has i
   assert.deepStrictEqual(sent.at(-1).slice(20, 24), [1, 5, 2, 25]);
   assert.deepStrictEqual([o.compatMode, o.releaseDebounceMs, o.dimMinutes, o.dimPercent], [true, 5, 2, 25]);
   await assert.rejects(make(0x02).setFirmwareOptions({ dimMinutes: 2 }), /needs a newer/, 'compat bit alone does not allow dim');
+});
+
+test('hold progress bar: options bytes 16..19, defaults from 0s, caps word 3 bit 8, only to firmware that has it', async () => {
+  const base = { snapMode: 'last', idleMinutes: 0 };
+  assert.deepStrictEqual(P.fwOptionsPacket(base).slice(24, 28), [0, 0, 255, 0], 'default: on (bit0 = 0), green');
+  const p = P.fwOptionsPacket({ ...base, holdBar: false, holdBarColor: [255, 16, 1] });
+  assert.deepStrictEqual(p.slice(24, 28), [1, 255, 16, 1], 'off = bit0, colour at 17..19');
+  assert.deepStrictEqual([P.parseFwOptions(p).holdBar, P.parseFwOptions(p).holdBarColor], [false, [255, 16, 1]]);
+  const old = P.fwOptionsPacket(base); old.fill(0, 24, 28);                   // older firmware / image: no such bytes
+  assert.deepStrictEqual([P.parseFwOptions(old).holdBar, P.parseFwOptions(old).holdBarColor], [true, [0, 255, 0]], '0s read as on, green');
+  const w3 = (v) => P.parseCaps([0, 4, 0, 0, 0, 0, 0, 0, 0, 0, v & 0xff, v >> 8]).features;
+  assert.ok(w3(0xc100).includes('holdBar') && !w3(0xc000).includes('holdBar') && !w3(0x8100).includes('holdBar'), 'CAPS3 bit 8 (with the build bit)');
+  const { Keyboard } = require('../src/keyboard');
+  const sent = [];
+  const make = (caps3) => {
+    const t = { async query(pkt) {
+      if (pkt[0] === P.HOST.CAPS) return [0, 4, 0, 0, 0, 0, 0, 0, 0, 0, caps3 & 0xff, caps3 >> 8];
+      if (pkt[0] === 0xfe && pkt[1] === 1) { sent.push(pkt); return pkt; }
+      return P.fwOptionsPacket(base);
+    } };
+    const kb = new Keyboard(t);
+    kb.info = { custom: true };
+    return kb;
+  };
+  await assert.rejects(make(0).setFirmwareOptions({ holdBar: false }), /Hold progress bar needs/);
+  assert.deepStrictEqual(P.fwOptionsPacket(base).slice(28, 32), [255, 0, 0, 0], 'Esc colour bytes 20..22 default red, 23 = 0');
+  const e = P.fwOptionsPacket({ ...base, holdBarEscColor: [1, 2, 3] });
+  assert.deepStrictEqual([e.slice(28, 32), P.parseFwOptions(e).holdBarEscColor], [[1, 2, 3, 0], [1, 2, 3]]);
+  const z = P.fwOptionsPacket(base); z.fill(0, 28, 32);
+  assert.deepStrictEqual(P.parseFwOptions(z).holdBarEscColor, [255, 0, 0], 'Esc colour 0s read as red');
+  for (const len of [16, 20]) { const r = P.fwOptionsPacket(base); r[2] = len; assert.ok(!('holdBarEscColor' in P.parseFwOptions(r)), `[2] = ${len}: no Esc colour`); }
+  const r24 = P.fwOptionsPacket(base); r24[2] = 24; assert.ok(P.parseFwOptions(r24).holdBarEscColor, '[2] = 24: Esc colour');
+  await assert.rejects(make(0).setFirmwareOptions({ holdBarColor: [1, 2, 3] }), /Hold progress bar needs/);
+  assert.strictEqual(sent.length, 0);
+  const o = await make(0xc100).setFirmwareOptions({ holdBar: false, holdBarColor: [0, 0, 255] });
+  assert.deepStrictEqual(sent.at(-1).slice(24, 28), [1, 0, 0, 255]);
+  assert.deepStrictEqual([o.holdBar, o.holdBarColor], [false, [0, 0, 255]]);
+  await make(0xc100).setFirmwareOptions({ holdBarEscColor: [9, 8, 7] });
+  assert.deepStrictEqual(sent.at(-1).slice(28, 31), [9, 8, 7], 'Esc colour written');
+  const pre = (() => { const t = { async query(pkt) {
+    if (pkt[0] === P.HOST.CAPS) return [0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0x00, 0xc1];
+    if (pkt[0] === 0xfe && pkt[1] === 1) { sent.push(pkt); return pkt; }
+    const r = P.fwOptionsPacket(base); r[2] = 20; return r;
+  } }; const kb = new Keyboard(t); kb.info = { custom: true }; return kb; })();
+  const n = sent.length;
+  await assert.rejects(pre.setFirmwareOptions({ holdBarEscColor: [1, 1, 1] }), /Esc colour needs a newer/);
+  assert.strictEqual(sent.length, n, 'nothing written to firmware without the Esc colour');
+});
+
+// firmware 0xFE as vendor_proto.c does it: GET answers [2] = its option length and the bytes at [8..];
+// SET stores exactly that many bytes from [8..] (the rest of the report is ignored) and echoes them
+function optionsFirmware({ len = P.FW_OPTS_LEN, caps3 = 0xc300, stored } = {}) {
+  const sent = [];
+  let opts = stored ?? [0, 255, 255, 255, 0, 0, 0, 0, ...new Array(len - 8).fill(0)];
+  const reply = () => { const r = new Array(64).fill(0); r[0] = 0xfe; r[2] = len; r.splice(8, len, ...opts); return r; };
+  const t = { async query(pkt) {
+    if (pkt[0] === P.HOST.CAPS) return [0, 4, 0, 0, 0, 0, 0, 0, 0x80, 0x0e, caps3 & 0xff, caps3 >> 8];   // + textTyping, compat, debounce, dim
+    if (pkt[0] === 0xfe && pkt[1] === 1) { sent.push(pkt); opts = pkt.slice(8, 8 + len); }
+    return reply();
+  } };
+  const kb = new Keyboard(t);
+  kb.info = { custom: true };
+  return { kb, sent, opts: () => opts };
+}
+
+test('mode flash: options bytes 24..43 (off bits, enter / leave colours per mode), encode / decode round trip', () => {
+  const base = { snapMode: 'last', idleMinutes: 0 };
+  const dflt = (mode) => ({ mode, enter: true, enterColor: [0, 255, 0], leave: true, leaveColor: [64, 64, 64] });
+  assert.deepStrictEqual(P.fwOptionsPacket(base).slice(32, 52), new Array(20).fill(0), 'no modeFlash: the packet ends at byte 23');
+  const all = P.fwOptionsPacket({ ...base, modeFlash: [1, 2, 3].map(dflt) });
+  assert.deepStrictEqual(all.slice(32, 52), new Array(20).fill(0), 'defaults go as 0 (all on, 0,0,0 colours)');
+  const list = [{ ...dflt(1), enter: false, leaveColor: [1, 2, 3] }, { ...dflt(2), enterColor: [0, 0, 255], leave: false },
+    { ...dflt(3), enter: false, leave: false, enterColor: [9, 9, 9], leaveColor: [255, 0, 0] }];
+  const p = P.fwOptionsPacket({ ...base, modeFlash: list });
+  const o = p.slice(8, 52);
+  assert.strictEqual(o[24], 0x01 | 0x20 | 0x04 | 0x40, 'bit n-1 = no enter flash, bit n+3 = no leave flash');
+  assert.deepStrictEqual([o.slice(25, 28), o.slice(28, 31)], [[0, 0, 0], [1, 2, 3]], 'mode 1 at 25 / 28');
+  assert.deepStrictEqual([o.slice(31, 34), o.slice(34, 37)], [[0, 0, 255], [0, 0, 0]], 'mode 2 at 31 / 34');
+  assert.deepStrictEqual([o.slice(37, 40), o.slice(40, 43), o[43]], [[9, 9, 9], [255, 0, 0], 0], 'mode 3 at 37 / 40, 43 reserved');
+  assert.deepStrictEqual(P.parseFwOptions(p).modeFlash, list, 'round trip');
+  assert.deepStrictEqual(P.parseModeFlash(new Array(44).fill(0)), [1, 2, 3].map(dflt), '0s read as on, green / dim white');
+  // the firmware's own example: mode 2 blue on, dark red off
+  const fw = new Array(44).fill(0); fw[33] = 0xff; fw[34] = 0x20;
+  assert.deepStrictEqual(P.parseModeFlash(fw)[1], { mode: 2, enter: true, enterColor: [0, 0, 255], leave: true, leaveColor: [0x20, 0, 0] });
+  // option length: 44 has modeFlash, 16 / 20 / 24 (firmware before it) leave it out
+  for (const len of [16, 20, 24]) { const r = P.fwOptionsPacket(base); r[2] = len; assert.ok(!('modeFlash' in P.parseFwOptions(r)), `[2] = ${len}: no modeFlash`); }
+  const r44 = P.fwOptionsPacket(base); r44[2] = 44; assert.ok(P.parseFwOptions(r44).modeFlash, '[2] = 44: modeFlash');
+  // merging changes: per mode, per field; bad values throw
+  const m = P.mergeModeFlash(list, [{ mode: 2, leave: true }, { mode: 3, enterColor: [1, 1, 1] }]);
+  assert.deepStrictEqual(m, [list[0], { ...list[1], leave: true }, { ...list[2], enterColor: [1, 1, 1] }]);
+  for (const [bad, re] of [[[{ mode: 1, enterColor: [0, 0, 0] }], /black/], [[{ mode: 4 }], /mode is 1..3/], [[{ mode: 1, blink: true }], /unknown field "blink"/],
+    [[{ mode: 1, enter: 1 }], /enter is true or false/], [[{ mode: 1, leaveColor: [1, 2] }], /leaveColor is \[r, g, b\]/], [[{ mode: 1 }, { mode: 1 }], /twice/], [{ mode: 1 }, /a list/]]) {
+    assert.throws(() => P.mergeModeFlash(list, bad), re, JSON.stringify(bad));
+  }
+});
+
+test('mode flash: caps word 3 bit 9 (with bit 15), only to firmware that has it', async () => {
+  const w3 = (v) => P.parseCaps([0, 4, 0, 0, 0, 0, 0, 0, 0, 0, v & 0xff, v >> 8]).features;
+  assert.ok(w3(0x8200).includes('modeFlash') && w3(0xc200).includes('modeFlash'), 'bit 15 + bit 9');
+  assert.ok(!w3(0x0200).includes('modeFlash') && !w3(0x8000).includes('modeFlash') && !w3(0xc100).includes('modeFlash'), 'no word 3 / no bit 9');
+  // caps without bit 9: refused before anything is written
+  for (const caps3 of [0xc100, 0]) {
+    const f = optionsFirmware({ caps3 });
+    await assert.rejects(f.kb.setFirmwareOptions({ modeFlash: [{ mode: 1, enter: false }] }), /Mode flash needs a newer open firmware \(feature "modeFlash"\)/);
+    assert.strictEqual(f.sent.length, 0, `caps3 ${caps3.toString(16)}: nothing written`);
+  }
+  // bad changes: nothing written either
+  const f = optionsFirmware();
+  await assert.rejects(f.kb.setFirmwareOptions({ modeFlash: [{ mode: 2, leaveColor: [0, 0, 0] }] }), (e) => /black/.test(e.message) && e.status === 400);
+  assert.strictEqual(f.sent.length, 0);
+});
+
+test('mode flash: read-modify-write keeps bytes 0..23 and the other modes', async () => {
+  const stored = [1, 255, 0, 16, 3, 1, 7, 1, 1, 2, 0, 1, 1, 4, 3, 40, 1, 9, 8, 7, 6, 5, 4, 0,
+    0x10, 1, 2, 3, 4, 5, 6, 0, 0, 0, 0, 0, 0, 11, 12, 13, 14, 15, 16, 0];
+  const f = optionsFirmware({ stored: [...stored] });
+  const o = await f.kb.setFirmwareOptions({ modeFlash: [{ mode: 2, enter: false, enterColor: [0, 0, 255] }] });
+  const w = f.sent.at(-1);
+  assert.deepStrictEqual(w.slice(8, 32), stored.slice(0, 24), 'bytes 0..23 written back as read');
+  assert.strictEqual(w[8 + 24], 0x10 | 0x02, 'mode 1 leave off kept, mode 2 enter off added');
+  assert.deepStrictEqual(w.slice(8 + 25, 8 + 31), stored.slice(25, 31), 'mode 1 colours kept');
+  assert.deepStrictEqual(w.slice(8 + 31, 8 + 37), [0, 0, 255, 0, 0, 0], 'mode 2 enter colour');
+  assert.deepStrictEqual(w.slice(8 + 37, 8 + 44), stored.slice(37, 44), 'mode 3 colours kept, 43 = 0');
+  assert.deepStrictEqual(o.modeFlash[1], { mode: 2, enter: false, enterColor: [0, 0, 255], leave: true, leaveColor: [64, 64, 64] }, 'the echo, parsed');
+  // another option changes: the mode flash bytes go back as they were
+  await f.kb.setFirmwareOptions({ idleMinutes: 9 });
+  assert.deepStrictEqual(f.sent.at(-1).slice(8 + 24, 8 + 44), f.sent.at(-2).slice(8 + 24, 8 + 44));
+  assert.strictEqual(f.sent.at(-1)[8 + 6], 9);
+  // a 44-byte firmware built without MODEFLASH (no caps bit): changes refused, the stored bytes kept on other writes
+  const g = optionsFirmware({ caps3: 0xc100, stored: [...stored] });
+  await g.kb.setFirmwareOptions({ idleMinutes: 1 });
+  assert.deepStrictEqual(g.opts().slice(24), stored.slice(24), 'mode flash bytes untouched');
+});
+
+test('mode flash: firmware with 24 option bytes gets exactly 24 (old firmware path)', async () => {
+  const stored = [0, 255, 255, 255, 1, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 0, 255, 0, 0, 0];
+  const f = optionsFirmware({ len: 24, caps3: 0xc300, stored: [...stored] });
+  const o = await f.kb.setFirmwareOptions({ idleMinutes: 3 });
+  assert.ok(!('modeFlash' in o), 'no modeFlash read back');
+  const w = f.sent.at(-1);
+  assert.deepStrictEqual(w.slice(8, 32), [...stored.slice(0, 6), 3, ...stored.slice(7)], 'its 24 bytes');
+  assert.deepStrictEqual(w.slice(32), new Array(32).fill(0), 'nothing past byte 23');
+  await assert.rejects(f.kb.setFirmwareOptions({ modeFlash: [{ mode: 1, enter: false }] }), /Mode flash needs a newer/, 'even with the caps bit');
+  assert.strictEqual(f.sent.length, 1, 'refused before writing');
 });
 
 test('factory reset: 0xFE 17 only on open firmware that reports it, reply checked', async () => {

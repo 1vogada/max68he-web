@@ -85,6 +85,7 @@
     modes: (u) => u.modes > 0 && `${n(u.modes, 'named mode')} in use: mode switching stops.`,
     mousekeys: (u) => u.mouseActions > 0 && `Mouse movement in ${n(u.mouseActions, 'key action')} stops working.`,
     mk_pressure: (u) => u.pressureMouse > 0 && `Depth-controlled mouse speed in ${n(u.pressureMouse, 'key action')}: one speed only.`,
+    modeflash: (u) => u.flashActions > 0 && `${n(u.flashActions, 'key')} with a hold bar flash in a key action: the flash does nothing (and modes turn on / off without a flash).`,
     macros: (u) => u.macros > 0 && `${n(u.macros, 'macro')} stored: macro keys do nothing.`,
     gamepad: (u) => u.gamepadBindings > 0 && `${n(u.gamepadBindings, 'key')} bound to the on-board gamepad: no gamepad.`,
     dks: (u) => u.dksKeys > 0 && `${n(u.dksKeys, 'dynamic keystroke key')}: they type like plain keys.`,
@@ -128,6 +129,7 @@
     return { keyActionMaps: maps.length, glideActions: maps.filter((m) => /"glide"/.test(m)).length,
       mouseActions: maps.filter((m) => /"(mouse|mouseKeys|move|wheel)"/.test(m)).length,
       pressureMouse: maps.filter((m) => /"speedBy":"(pressure|both)"/.test(m)).length,
+      flashActions: maps.filter((m) => /"flash":/.test(m)).length,
       modes: (r.modes ?? []).filter((m) => m?.name).length };
   }
   // the use fields from POST /api/advanced/list's keys ([{ kind: 'dks' | 'snap' | 'modtap' | 'toggle', levels }])
@@ -142,7 +144,7 @@
   // those fields are known and it doesn't, unknown (null) otherwise
   const USE_FIELDS = { text: ['textKeys'], text_typing: ['textKeys'], sequence: ['sequencePlaying'], glide: ['glideActions'],
     fx: ['lightingMode'], pfx: ['lightingMode'], droplet: ['lightingMode'], keyact: ['keyActionMaps'], modes: ['modes'],
-    mousekeys: ['mouseActions'], mk_pressure: ['pressureMouse'], macros: ['macros'], gamepad: ['gamepadBindings'],
+    mousekeys: ['mouseActions'], mk_pressure: ['pressureMouse'], modeflash: ['flashActions'], macros: ['macros'], gamepad: ['gamepadBindings'],
     dks: ['dksKeys'], dks_levels: ['dksMultiLevel'], advkeys: ['advancedKeys'], user_layers: ['userLayerKeys'],
     fn_layers: ['fnLayerKeys'], calib: ['calibratedKeys'] };
   function inUse(f, use = {}) {

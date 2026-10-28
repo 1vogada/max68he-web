@@ -20,8 +20,12 @@
       return { name, pct, level: level(pct), text: `${name} ${Math.round(pct)} %` };
     };
     const bars = [bar('Flash', mem.flashUsed, mem.flashSize), bar('RAM', ram, mem.ramSize)];
+    // key action engine 6: the rest of the RAM is the key map pool; this bar is how much of it the maps use
+    const pool = mem.kaPool?.bytes ? mem.kaPool : null;
+    if (pool) bars.push(bar('Maps', pool.used, pool.bytes));
     const tip = [`Flash: ${kb(mem.flashUsed)} of ${kb(mem.flashSize)}`,
       `RAM: ${kb(ram)} of ${kb(mem.ramSize)} (static ${kb(mem.ramStatic)} + ${kb(mem.ramReserved)} heap / stack floor)`,
+      ...(pool ? [`Key maps: ${kb(pool.used)} of the ${kb(pool.bytes)} left for them (the RAM after everything else)`] : []),
       ...(mem.stackPeak ? [`stack peak ${kb(mem.stackPeak)}`] : [])].join('\n');
     return { known: true, bars, tip };
   }

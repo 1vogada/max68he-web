@@ -1,5 +1,5 @@
-// Settings page: key calibration wizard, speed measurement and one-click
-// firmware update (panels added after "Profile backup").
+// General settings: key calibration wizard and speed measurement; the Firmware page's Update tab:
+// one-click firmware update (panels added after "Keyboard options").
 (() => {
   const App = (window.App = window.App || {});
   App.views = App.views || {};
@@ -31,7 +31,7 @@
   const speed = panel('speed-panel', `
     <h2>Speed</h2>
     <p class="muted small">How fast the keyboard reads its sensors (scans/s) and handles them (passes/s). USB polls at 8000 Hz.
-      Performance mode (Firmware options) switches the lighting off to give the keys more time.</p>
+      Performance mode (Firmware → Options) switches the lighting off to give the keys more time.</p>
     <div class="row-buttons"><button type="button" id="speed-run">Measure (1 s)</button></div>
     <dl class="facts" id="speed-out"></dl>`);
 
@@ -123,7 +123,7 @@
 
   function init() {
     const { $ } = App;
-    $('#fw-form').after(cal, speed, fwu);
+    $('#options-form').after(cal, speed, fwu);
     $('#cal-start').onclick = () => calDo('start', 'Starting calibration…');
     $('#cal-finish').onclick = () => calDo('finish', 'Saving the calibration…');
     $('#cal-cancel').onclick = () => calDo('cancel', 'Cancelling…');

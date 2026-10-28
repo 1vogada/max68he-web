@@ -14,12 +14,13 @@
     optTracker?.clear();
   }
 
-  // open-firmware options (Settings > Firmware options)
+  // open-firmware options (Firmware > Options)
   function fillFirmware(o) {
     const f = App.$('#fw-form');
     App.ui.gate(f, o ? null : App.ui.firmwareReason('These options'));
     fwTracker?.clear();
     App.textTyping?.fill(o);
+    App.modeFlash?.fill(o);   // (again below: the data-cap pass shows the Settings one by the caps alone)
     if (!o) return;
     f.elements.capsIndicator.checked = o.capsIndicator;
     f.elements.layerIndicator.checked = o.layerIndicator;
@@ -47,11 +48,18 @@
     f.elements.dimMinutes.value = o.dimMinutes ?? 0;
     f.elements.dimPercent.value = o.dimPercent ?? 30;
     idleText();
-    f.elements.capsColor.value = `#${o.capsColor.map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+    const hex = (c) => `#${c.map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+    f.elements.capsColor.value = hex(o.capsColor);
+    f.elements.holdBar.checked = o.holdBar !== false;
+    f.elements.holdBarColor.value = hex(o.holdBarColor ?? [0, 255, 0]);
+    f.elements.holdBarEscColor.value = hex(o.holdBarEscColor ?? [255, 0, 0]);
+    f.elements.holdBarEscColor.closest('label').hidden = !o.holdBarEscColor;
+    App.modeFlash?.fill(o);   // after the data-cap pass: also hidden when the firmware has no option bytes 24..43
   }
   App.fillFirmware = (o) => { fillFirmware(o); fillReset(); };
 
-  const CAP_NAMES = { compatMode: 'compatibility mode', releaseDebounce: 'release debounce', idleDim: 'dim after idle' };
+  const CAP_NAMES = { compatMode: 'compatibility mode', releaseDebounce: 'release debounce', idleDim: 'dim after idle', holdBar: 'hold progress bar',
+    modeFlash: 'mode flash' };
 
   function idleText() {
     const f = App.$('#fw-form');
@@ -131,6 +139,7 @@
     const fw = $('#fw-form');
     const has = (feature) => (App.st.features ?? []).includes(feature);
     App.textTyping.mount($('#fw-text-typing'));
+    App.modeFlash.mount($('#fw-mode-flash'));
     fw.addEventListener('input', (e) => { if (['idleMinutes', 'dimMinutes', 'dimPercent', 'releaseDebounceMs'].includes(e.target.name)) idleText(); });
     fwTracker = App.ui.track(fw, {
       async save() {
@@ -143,6 +152,9 @@
           ...(has('compatMode') ? { compatMode: e.compatMode.checked } : {}),
           ...(has('releaseDebounce') ? { releaseDebounceMs: Number(e.releaseDebounceMs.value) } : {}),
           ...(has('idleDim') ? { dimMinutes: Number(e.dimMinutes.value), dimPercent: Number(e.dimPercent.value) } : {}),
+          ...(has('holdBar') ? { holdBar: e.holdBar.checked, holdBarColor: e.holdBarColor.value.slice(1),
+            ...(App.st.fwOptions?.holdBarEscColor ? { holdBarEscColor: e.holdBarEscColor.value.slice(1) } : {}) } : {}),
+          ...(App.modeFlash.supported() ? { modeFlash: App.modeFlash.read($('#fw-mode-flash')) } : {}),
         });
         App.st.fwOptions = r.fwOptions;
         fillFirmware(r.fwOptions);

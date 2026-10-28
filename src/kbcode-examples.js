@@ -63,6 +63,19 @@ kb.key('Caps').modTap('LCtrl', 'Esc', 200);
 `,
   },
   {
+    name: 'mode-flash',
+    title: 'A Tilde mode the keyboard shows: the hold bar column flashes when it turns on / off; kb.flash',
+    code: `// Fn + Ctrl + B toggles a Tilde mode; in it Esc types \`.
+// The hold bar column (Home .. Right) flashes 3 times cyan when the mode turns on,
+// once in the default dim white when it turns off (needs feature 'modeFlash').
+const tilde = kb.mode('Tilde', { flash: 'cyan', leaveFlash: true });
+kb.key('B').when('press').if({ held: ['Fn', 'LCtrl'] }).do(tilde.toggle());
+tilde.remap('Esc', '\`');
+// Fn + P: 5 magenta flashes, to see that the keyboard's rules run
+kb.key('P').when('press').if({ held: ['Fn'] }).do(kb.flash('magenta', 5));
+`,
+  },
+  {
     name: 'texts-macros',
     title: 'Text keys, a macro and the Fn layer',
     code: `kb.text(0, 'Best regards,\\nIvo');

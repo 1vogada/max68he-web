@@ -10,10 +10,25 @@ const isDeviceError = (e) => e?.device === true;
 
 // blocked() returns an error while nothing may open the keyboard (a flash runs).
 // key() names the model to open (models.js); undefined lets Keyboard.open pick.
-function createConnection({ blocked = () => null, key = () => undefined } = {}) {
+// idleMs: close the keyboard (and its cross-process lock, lock.js) after this long with no
+// request, so another program (the web UI) can open it; the next request reopens. Flash pacing
+// is per process (hid.js pace), so it holds across the reopen. Omitted: stays open.
+function createConnection({ blocked = () => null, key = () => undefined, idleMs = 0 } = {}) {
   let kb = null;
   let opening = null;
   let closing = null;
+  let active = 0;
+  let idle = null;
+
+  // (re)starts the idle countdown once no request is running
+  function rest() {
+    clearTimeout(idle);
+    idle = null;
+    if (idleMs > 0 && active === 0 && (kb || opening)) {
+      idle = setTimeout(() => { idle = null; if (active === 0) drop(); }, idleMs);
+      idle.unref?.();
+    }
+  }
 
   function get() {
     const why = blocked();
@@ -26,7 +41,7 @@ function createConnection({ blocked = () => null, key = () => undefined } = {}) 
         return kb;
       })().finally(() => { opening = null; });
     }
-    return opening;
+    return opening.finally(rest);
   }
 
   // Closes the keyboard once the work already queued on it has run, so requests
@@ -49,6 +64,17 @@ function createConnection({ blocked = () => null, key = () => undefined } = {}) 
   // on its first send; when no packet at all reached the keyboard meanwhile, the request
   // runs once more on a reopened handle instead of failing. onFail(e) runs after each failure.
   async function run(fn, onFail = fail) {
+    active++;
+    clearTimeout(idle);
+    try {
+      return await attempt(fn, onFail);
+    } finally {
+      active--;
+      rest();
+    }
+  }
+
+  async function attempt(fn, onFail) {
     const before = sentCount();
     try {
       return await fn();

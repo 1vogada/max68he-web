@@ -46,6 +46,9 @@ type Color = string | [number, number, number];
 /** A mode: 'Mouse' (its name) or the ModeRef from kb.mode('Mouse'), or its number 1..3. */
 type ModeName = string | ModeRef | 1 | 2 | 3;
 
+/** kb.mode(name, { flash, leaveFlash }): true = on (default colour), false = off, a colour = on in it. */
+interface ModeFlash { flash?: boolean | Color; leaveFlash?: boolean | Color }
+
 /** Remap layers: 'base' (default), 'fn' (Fn layer 1), 'fn2'..'fn4' (open firmware 'fnLayers'), 'l1'..'l3'
  *  (user layers = modes 1..3; a mode name works too). { layer: 'fn', os: 'mac' } edits the Fn layer of
  *  another OS ('win' default, 'mac', 'android', 'ios'). */
@@ -100,10 +103,20 @@ interface KB {
 
   /** Declare (or refer to) a mode by name. Modes are the open firmware's user layers 1..3; the keyboard has 3.
    *  Without a number it reuses the keyboard's mode of that name, else takes a free one. Rules test modes with
-   *  .if({ mode }) and switch them with mode.enter() / .leave() / .toggle(). Needs key action engine 2. */
-  mode(name: string, id?: 1 | 2 | 3): ModeRef;
+   *  .if({ mode }) and switch them with mode.enter() / .leave() / .toggle(). Needs key action engine 2.
+   *  flash options (firmware feature 'modeFlash'): how the keyboard shows the mode turning on / off. The hold
+   *  bar column (Home, Del, PgUp, PgDn, Right) flashes 3 times when it turns on (flash, default green) and once
+   *  when it turns off (leaveFlash, default dim white #404040). Each: true = on in the default colour, false =
+   *  off, a colour = on in that colour; both on by default, left as they are when not given. Black is an error
+   *  (0, 0, 0 means the default on the keyboard). A firmware option per mode, saved on the keyboard. */
+  mode(name: string, id?: 1 | 2 | 3, flash?: ModeFlash): ModeRef;
+  mode(name: string, flash: ModeFlash): ModeRef;
   /** Action: leave every mode. */
   leaveAllModes(): Action;
+  /** Action (firmware feature 'modeFlash'): the hold bar column (Home, Del, PgUp, PgDn, Right) flashes `times`
+   *  times (1..15, default 3) in `color` (default green; black is an error). Fires once, with any trigger and
+   *  .if(); takes no .mode(). kb.key('P').when('press').if({ held: ['Fn'] }).do(kb.flash('magenta', 5)) */
+  flash(color?: Color | true, times?: number): Action;
   /** Remove every key action map on the keyboard that this script does not define (default: they are kept). */
   resetKeyActions(): KB;
 
@@ -152,6 +165,11 @@ interface KB {
   }): KB;
   /** = firmwareOptions({ textTyping: m }) */
   textTyping(m: 'keep' | 'block' | 'stop'): KB;
+  /** Hold progress bar (firmware feature 'holdBar'): while a key action HOLD rule builds up, Home, Del, PgUp,
+   *  PgDn and Right fill over its hold time and flash 3 times when it fires. on: default true; color: any
+   *  colour string or [r, g, b] (default green); escColor: the colour while an Esc hold drives it (Fn+Esc
+   *  leave-all-modes, a HOLD rule on Esc), default red. A firmware option, saved on the keyboard. */
+  holdBar(o: { on?: boolean; color?: string | [number, number, number]; escColor?: string | [number, number, number] }): KB;
 
   /** Colour helpers: return '#rrggbb'. rgb 0..255 each; hsl: hue 0..360, saturation and lightness 0..100. */
   rgb(r: number, g: number, b: number): string;
@@ -252,7 +270,7 @@ interface Rule {
    *  (only while the trigger holds), 'tap' (a short tap, or once), 'toggle' (flips on / off), 'release' (turns it off).
    *  Defaults: press / hold -> press, down -> while, up / tap / release -> tap; jump / glide / wheel happen once
    *  (tap or press); mouse.move / scroll -> while; mode enter / leave / toggle -> press ('while' + enter = only
-   *  while held). */
+   *  while held). kb.flash takes none (it fires once; an error with .mode()). */
   mode(how: 'press' | 'while' | 'tap' | 'toggle' | 'release'): Rule;
   /** Add the rule (one per action). Returns the rule so more .do() calls can follow. A string is kb.send(string). */
   do(...actions: (Action | string)[]): Rule;

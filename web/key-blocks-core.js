@@ -7,6 +7,8 @@
 // Block: { id, key, when, at?, ms?, mode, held: [key names], notHeld: [key names], modes: [mode ids], notModes: [ids], do }
 // `do` is the driver's rule `do`, except a mode change names its mode by id: { mode: 1, action }.
 // Modes: [{ id: 1..3, name, active? }] (name '' = not created).
+// A flash (`do: { flash: true | '#rrggbb' | [r, g, b], times }`, caps 'modeFlash') fires once and has no "how long":
+// its block mode is always 'press' and is never written (on the keyboard the rule's mode byte is the count).
 (() => {
   const KA = typeof module !== 'undefined' ? require('./key-actions-core') : window.App.keyActions;
   const GL = typeof module !== 'undefined' ? require('./glide-core') : window.App.glide;
@@ -27,6 +29,7 @@
   const SPEED_BY = ['time', 'pressure', 'both'];
   const MK_PRESS = { from: 0.5, to: 3.2, maxMm: 4, engine: 4 };
   const MODE_ACTIONS = ['enter', 'leave', 'toggle'];
+  const FLASH = { times: 3, max: 15 };   // a flash's default and most flashes
   // kinds of action a block can do, in the order the page offers them
   const MOD_TEXT = { LCtrl: 'Left Ctrl', RCtrl: 'Right Ctrl', LShift: 'Left Shift', RShift: 'Right Shift', LAlt: 'Left Alt', RAlt: 'Right Alt', LWin: 'Left Win', RWin: 'Right Win' };
   const ALIAS = { Ctrl: 'LCtrl', Shift: 'LShift', Alt: 'LAlt', Win: 'LWin' };
@@ -34,11 +37,19 @@
   const clone = (x) => JSON.parse(JSON.stringify(x));
   const isWheel = (dir) => dir === 'wheelUp' || dir === 'wheelDown';
   const hasPower = (curve) => ['easeIn', 'easeOut', 'easeInOut', 'expo'].includes(curve);
+  // a flash colour -> [r, g, b], or null for the default green (true)
+  function flashRgb(c) {
+    if (Array.isArray(c)) return c;
+    if (typeof c === 'string' && /^#?[0-9a-f]{6}$/i.test(c)) { const v = parseInt(c.replace('#', ''), 16); return [v >> 16, (v >> 8) & 0xff, v & 0xff]; }
+    return null;
+  }
+  const hexOf = (c) => `#${c.map((v) => v.toString(16).padStart(2, '0')).join('')}`;
 
   function kindOf(d) {
     if (!d || typeof d !== 'object') return null;
     if ('mouseKeys' in d) return 'mouseKeys';
     if ('leaveAllModes' in d) return 'leaveAllModes';
+    if ('flash' in d) return 'flash';
     if ('mode' in d && 'action' in d) return 'mode';
     return KA.outputKind(d);
   }
@@ -60,6 +71,7 @@
   function driverDefaultMode(when, d) {
     const kind = kindOf(d);
     if (kind === 'mouseKeys') return 'while';
+    if (kind === 'flash') return 'press';
     if (KA.ONCE.includes(kind)) return 'tap';
     return KA.DEFAULT_MODE[when] ?? 'press';
   }
@@ -68,6 +80,7 @@
     if (kind === 'mouseKeys') return ['while', 'press', 'toggle'].filter((m) => !(m === 'while' && noWhile));
     if (kind === 'mode') return ['press', 'tap', ...(d.action === 'enter' && !noWhile ? ['while'] : [])];
     if (kind === 'leaveAllModes') return ['press', 'tap'];
+    if (kind === 'flash') return ['press'];
     return KA.allowedModes(when, kind);
   }
   const fitMode = (b) => (allowedModes(b.when, b.do).includes(b.mode) ? b.mode
@@ -205,7 +218,8 @@
 
   // what would stop a save: [{ id (block) | null, msg }]
   // engine: the keyboard's key action engine (undefined: not known, nothing checked against it)
-  function check(blocks, modes = [], { engine } = {}) {
+  // flash: the keyboard has caps 'modeFlash' (undefined: not known, not checked)
+  function check(blocks, modes = [], { engine, flash } = {}) {
     const out = [], use = slotUse(blocks);
     const bad = (b, msg) => out.push({ id: b ? b.id : null, msg });
     for (const b of blocks) {
@@ -221,6 +235,12 @@
       if ((b.when === 'hold' || b.when === 'tap') && !(b.ms >= 10 && b.ms <= 10000)) bad(b, 'The time must be 0.01 to 10 s.');
       if ((b.when === 'down' || b.when === 'up') && !(b.at >= 0.1 && b.at <= 4)) bad(b, 'The depth must be 0.10 to 4.00 mm.');
       if (b.do && !allowedModes(b.when, b.do).includes(b.mode)) bad(b, 'That "how long" doesn\'t go with this trigger and action.');
+      if (kindOf(b.do) === 'flash') {
+        const n = b.do.times ?? FLASH.times;
+        if (!(Number.isInteger(n) && n >= 1 && n <= FLASH.max)) bad(b, `A flash is 1 to ${FLASH.max} times.`);
+        if (flashRgb(b.do.flash)?.every((v) => v === 0)) bad(b, 'Black can\'t flash (the keyboard reads it as the default green): pick a colour.');
+        if (flash === false) bad(b, 'The hold bar flash needs a newer open firmware on the keyboard (feature "modeFlash"): flash the latest build.');
+      }
       if (kindOf(b.do) === 'mouseKeys') {
         const w = isWheel(b.do.mouseKeys), lo = w ? 0.1 : 10, hi = w ? 25.5 : 2550;
         if (!(b.do.start >= lo && b.do.max <= hi && b.do.start <= b.do.max)) bad(b, `Speeds must be ${lo} to ${hi} ${w ? 'notches/s' : 'px/s'}, start no faster than max.`);
@@ -279,6 +299,10 @@
     if (!d) return 'nothing yet';
     if (kind === 'mode') return `${d.action} mode ${modeName(modes, d.mode)}${b.mode === 'while' ? ' (only while held)' : ''}`;
     if (kind === 'leaveAllModes') return 'leave every mode';
+    if (kind === 'flash') {
+      const n = d.times ?? FLASH.times, c = flashRgb(d.flash);
+      return `flash the hold bar ${n} time${n === 1 ? '' : 's'}${c ? ` in ${hexOf(c)}` : ' (green)'}`;
+    }
     if (kind === 'mouseKeys') {
       const w = isWheel(d.mouseKeys), u = w ? 'notches/s' : 'px/s';
       const what = w ? `scroll ${d.mouseKeys === 'wheelUp' ? 'up' : 'down'}` : `move the mouse ${d.mouseKeys}`;
@@ -337,7 +361,7 @@
   }
 
   const api = {
-    MAX_RULES, MAX_HELD, MAX_CONDITIONS, MAX_MODES, TRIGGERS, DIRS, CURVES, CURVE_TEXT, MK_DEFAULTS, MK_SHARE, SPEED_BY, MK_PRESS, MODE_ACTIONS, MOD_TEXT,
+    MAX_RULES, MAX_HELD, MAX_CONDITIONS, MAX_MODES, FLASH, flashRgb, hexOf, TRIGGERS, DIRS, CURVES, CURVE_TEXT, MK_DEFAULTS, MK_SHARE, SPEED_BY, MK_PRESS, MODE_ACTIONS, MOD_TEXT,
     kindOf, mouseKeysDo, byPressure, driverDefaultMode, allowedModes, fitMode, isWheel, hasPower,
     newBlock, toBatch, fromMaps, ruleOf, modeIdOf,
     ruleSlots, slotUse, conditionCount, check,

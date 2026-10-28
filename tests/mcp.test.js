@@ -39,4 +39,25 @@ test('MCP set_firmware_options takes the round 5 options with their limits', () 
   for (const k of ['compatMode', 'releaseDebounceMs', 'dimMinutes', 'dimPercent']) assert.ok(shape[k], `${k} in the schema`);
   assert.ok(shape.releaseDebounceMs.safeParse(10).success && !shape.releaseDebounceMs.safeParse(11).success, 'release debounce 0..10');
   assert.ok(!shape.dimPercent.safeParse(101).success && shape.compatMode.safeParse(true).success);
+  assert.ok(shape.holdBar.safeParse(false).success && shape.holdBarColor.safeParse([0, 255, 0]).success && shape.holdBarEscColor.safeParse([255, 0, 0]).success, 'hold bar fields');
+  assert.ok(!shape.holdBarColor.safeParse([0, 256, 0]).success && !shape.holdBarColor.safeParse([0, 255]).success);
+});
+
+test('MCP: modeFlash per mode in set_firmware_options, the flash action in the key action and kbcode tools', () => {
+  const { server } = require('../src/mcp');
+  const t = server._registeredTools;
+  const shape = t.set_firmware_options.inputSchema.shape ?? t.set_firmware_options.inputSchema;
+  const mf = shape.modeFlash;
+  assert.ok(mf.safeParse([{ mode: 2, enter: false, enterColor: [0, 0, 255], leave: true, leaveColor: [64, 64, 64] }]).success, 'all fields');
+  assert.ok(mf.safeParse([{ mode: 1, leave: false }, { mode: 3, enterColor: [255, 0, 255] }]).success, 'only what changes');
+  for (const bad of [[{ mode: 0 }], [{ mode: 4 }], [{ enter: true }], [{ mode: 1, enterColor: [0, 256, 0] }], [{ mode: 1, leaveColor: [1, 2] }],
+    [{ mode: 1, blink: true }], [{ mode: 1 }, { mode: 2 }, { mode: 3 }, { mode: 1 }]]) {
+    assert.ok(!mf.safeParse(bad).success, JSON.stringify(bad));
+  }
+  assert.match(mf.description, /3 times when a key action mode turns on.*once when it turns off/);
+  assert.match(mf.description, /Black \[0, 0, 0\] is refused/);
+  assert.match(t.set_key_actions.description, /flash: true \| \[r, g, b\] \| "#rrggbb", times\?: 1..15/);
+  assert.ok(t.set_key_actions.inputSchema.safeParse({ key: 'Home', rules: [{ when: 'press', do: { flash: [255, 0, 255], times: 5 } }] }).success);
+  assert.match(t.run_kb_code.description, /kb\.flash\('magenta', 5\)/);
+  assert.match(t.run_kb_code.description, /kb\.mode\('Tilde', \{ flash: 'cyan', leaveFlash: false \}\)/);
 });

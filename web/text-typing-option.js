@@ -1,6 +1,6 @@
 // "While a text is typing" (open-firmware option textTyping, caps 'textTyping'): one
-// 3-way control, shown on the Text keys page (applied at once) and in Settings > Firmware
-// options (saved with that form's Save). Both show what the keyboard has; a change
+// 3-way control, shown on the Text keys page (applied at once) and in Firmware > Options
+// (saved with that form's Save). Both show what the keyboard has; a change
 // saved from either one shows in the other.
 (() => {
   const App = (window.App = window.App || {});

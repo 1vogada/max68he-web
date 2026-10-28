@@ -26,6 +26,7 @@
 
   function drawModes(S, api) {
     bound = api;
+    App.modeFlash?.names(S.modes.map((m) => m.name));   // the mode flash rows under the list show the names too
     const box = App.$('#kb-modes-list');
     if (!box) return;
     box.innerHTML = S.modes.map((m) => {

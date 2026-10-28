@@ -17,7 +17,7 @@ const OUT = path.join(ROOT, 'site');
 const SHIMS = path.join(ROOT, 'web-build');
 const NODE_SHIMS = ['fs', 'path', 'os', 'crypto', 'child_process', 'http'];
 // src modules swapped as a whole (matched by their file name inside src/)
-const SRC_SHIMS = { 'lock.js': 'lock.js', 'flasher.js': 'flasher.js', 'appwatch.js': 'appwatch.js', 'fw-builder.js': 'fw-builder.js' };
+const SRC_SHIMS = { 'lock.js': 'lock.js', 'flasher.js': 'flasher.js', 'appwatch.js': 'appwatch.js', 'fw-builder.js': 'fw-builder.js', 'assistant.js': 'assistant.js' };
 
 function plugins() {
   const dir = path.join(ROOT, 'plugins');

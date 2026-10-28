@@ -92,6 +92,10 @@
   }
 
   function actionText(r) {
+    if (r.do && typeof r.do === 'object' && 'flash' in r.do) {   // the FLASH output (caps 'modeFlash'): no mode, fires once
+      const n = r.do.times ?? 3, c = r.do.flash;
+      return `flashes the hold bar ${n} time${n === 1 ? '' : 's'}${typeof c === 'string' ? ` in ${c}` : Array.isArray(c) ? ` in rgb(${c.join(', ')})` : ''}`;
+    }
     const kind = outputKind(r.do), o = outputText(r.do), mode = r.mode ?? defaultMode(r);
     if (ONCE.includes(kind)) return o;
     const axis = kind === 'axis' || kind === 'axisDepth';
@@ -179,7 +183,9 @@
     const deepRule = downs.length >= 2 || (downs[0] && downs[0].at < BOTTOM_FROM) ? downs[0] : null;
     const bottomRule = downs.length >= 2 ? downs[1] : downs[0] && downs[0].at >= BOTTOM_FROM ? downs[0] : null;
     for (const r of rules) {
-      if (r.when === 'press' && !used.has('light')) take('light', r, {});
+      // a flash has no mode (its mode byte is the count): no question takes it, it is kept as it is
+      if (r.do && typeof r.do === 'object' && 'flash' in r.do) extra.push(r);
+      else if (r.when === 'press' && !used.has('light')) take('light', r, {});
       else if (r === deepRule) take('deep', r, { at: r.at });
       else if (r === bottomRule) take('bottom', r, { at: r.at });
       else if (r.when === 'tap' && !used.has('tap')) take('tap', r, { ms: r.ms });

@@ -15,7 +15,7 @@ const RULE_HELP = 'Each rule: { when, at?, ms?, mode?, do }. '
   + 'notHeld?: same (keys that must NOT be held; engine 5; held + notHeld at most 3 keys, a key not in both), '
   + 'mode?: "Mouse" | 1 | [..] (all these modes active), notMode?: same (none of them active) } (a rule fires only while its if is true; '
   + 'a key with a map types normally when none of its rules\' if is true at the press); '
-  + 'do: { mode: "Mouse" | 1..3, action: "enter" | "leave" | "toggle" } (modes are user layers 1..3; mode "while" + enter = only while held), '
+  + 'do: { mode: "Mouse" | 1..3, action: "enter" | "leave" | "toggle" } (modes 1..3 are user layers 1..3; key action engine 6 adds modes 4..32 and any number of rules per key; mode "while" + enter = only while held), '
   + '{ leaveAllModes: true }, { mouseKeys: up|down|left|right|wheelUp|wheelDown, start?, max?, rampMs?, curve?, power?, shareSpeed?, keepMs?, speedBy?, pressFrom?, pressTo? } '
   + '(accelerating pointer / wheel while on; px/s 10..2550 (default 100 -> 1200) or notches/s 0.1..25.5 (default 2 -> 10), rampMs 0..10000 (1000), '
   + 'curve linear|easeIn|easeOut|easeInOut|sine|expo|smooth (easeIn), power: ease 0.3..8 (2), expo -20..20 not 0 (5); default mode while; takes 2 of the 6 rule slots; '
@@ -25,6 +25,9 @@ const RULE_HELP = 'Each rule: { when, at?, ms?, mode?, do }. '
   + 'rampMs / keepMs / shareSpeed have no effect; no movement while shallower than pressFrom) or "both" (the depth sets the top speed, rampMs builds up to it); '
   + 'pressFrom / pressTo: mm, 0 <= from < to <= 4, 0.1 mm steps (default 0.5 -> 3.2; only with pressure / both); '
   + 'pressure / both take 3 of the 6 rule slots and need key action engine 4). '
+  + 'Firmware with caps "modeFlash" adds do: { flash: true | [r, g, b] | "#rrggbb", times?: 1..15 (default 3) }: the hold bar column '
+  + '(Home/Del/PgUp/PgDn/Right) flashes times times in that colour (true = the default green; black [0, 0, 0] is refused); it fires once, '
+  + 'any trigger and if work, and the rule takes no mode (its mode byte is the count). Example: { when: "press", do: { flash: [255, 0, 255], times: 5 } }. '
   + 'Mode names must exist on the keyboard (set_mode_name, or modes in the batch).';
 
 const EXAMPLES = 'Examples. Walk / run on W: { key: "W", rules: [{ when: "press", do: { axis: "LY-", percent: 40 } }, '
@@ -74,13 +77,14 @@ function registerKeyActionTools({ server, z, tool, OPEN_FW }) {
   }));
 
   server.registerTool('get_modes', {
-    description: 'Key action modes 1..3 (they are user layers 1..3): their names and which are active now. Rules use them in if: { mode } '
-      + `and do: { mode, action }. Newer open firmware (key action engine 2, "keyModes"). ${OPEN_FW}`,
+    description: 'Key action modes 1..3 (they are user layers 1..3; key action engine 6 adds flag modes 4..32, with their own flash settings): their names and which are active now. Rules use them in if: { mode } '
+      + 'and do: { mode, action }. How the keyboard shows a mode turning on / off (the mode flash) is in get_firmware_options / '
+      + `set_firmware_options modeFlash. Newer open firmware (key action engine 2, "keyModes"). ${OPEN_FW}`,
   }, tool((k) => k.getModes()));
 
   server.registerTool('set_mode_name', {
-    description: `Name a key action mode (1..3) so rules can say if: { mode: "Mouse" }. '' clears the name; 1..16 bytes UTF-8; names are unique. ${OPEN_FW}`,
-    inputSchema: { id: z.number().int().min(1).max(3).describe('mode 1..3'), name: z.string().max(16).describe("the name ('' clears it)") },
+    description: `Name a key action mode (1..3; key action engine 6: 1..32) so rules can say if: { mode: "Mouse" }. '' clears the name; 1..16 bytes UTF-8; names are unique. ${OPEN_FW}`,
+    inputSchema: { id: z.number().int().min(1).max(32).describe('mode 1..3 (engine 6: 1..32)'), name: z.string().max(16).describe("the name ('' clears it)") },
   }, tool((k, { id, name }) => k.setModeName(id, name)));
 }
 

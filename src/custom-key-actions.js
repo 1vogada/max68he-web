@@ -4,9 +4,12 @@
 // key-actions.js / key-modes.js. The driver owns the condition table: a write computes the entries
 // its maps need, reuses identical ones, allocates free ones, writes them BEFORE the records and
 // clears the ones no record uses AFTER. The keyboard saves the table on its own.
+// Engine 6 (caps 'kaPool'): the sizes come from INFO (as many records, conditions as the keyboard's free
+// RAM / flash hold), a key's rules go into as many records (parts) as they need, each record's conditions
+// lie in one bank of 15 entries, 32 modes (4..32 flags only) with their own flash settings.
 // Mixed into Keyboard.prototype by keyboard.js.
 const P = require('./protocol');
-const { parseSpec, toRecord, fromRecord, usesModes } = require('./key-actions');
+const { parseSpec, toRecords, splitParts, mergeParts, fromRecord, usesModes, usesFlash } = require('./key-actions');
 const M = require('./key-modes');
 
 const err = (msg) => Object.assign(new Error(msg), { status: 400 });
@@ -15,6 +18,8 @@ const NEEDS_V2 = 'Conditions (if), modes and mouse keys need a newer open firmwa
 const NEEDS_V3 = 'Mouse keys with shareSpeed need a newer open firmware (key action engine 3)';
 const NEEDS_V4 = 'Mouse keys with speedBy pressure or both need a newer open firmware (key action engine 4)';
 const NEEDS_V5 = 'Conditions with notHeld need a newer open firmware (key action engine 5)';
+const NEEDS_FLASH = 'A flash (do: { flash }) needs a newer open firmware (feature "modeFlash")';
+const NEEDS_V6 = 'Modes 4..32 and more than 6 rule slots per key need a newer open firmware (key action engine 6)';
 const TABLE_ERRORS = { 3: 'bad value', 4: 'bad index', 5: 'in use (a key map uses it)' };
 const prefixed = (e, where) => (where && e.status === 400 ? Object.assign(e, { message: `${where}: ${e.message}` }) : e);
 const refsOf = (record) => P.decodeKaRecord(record).rules.map((x) => x.cond).filter(Boolean);
@@ -25,10 +30,12 @@ function checkModeName(name, where = 'name') {
   try { P.encodeModeName(name.trim()); } catch (e) { throw err(`${where}: ${e.message}`); }
   return name.trim();
 }
-const checkModeId = (id, where = 'id') => {
-  if (!Number.isInteger(id) || id < 1 || id > P.KA.MODES) throw err(`${where} is a mode number 1..${P.KA.MODES}`);
+const checkModeId = (id, where = 'id', max = P.KA.MAX_MODES) => {
+  if (!Number.isInteger(id) || id < 1 || id > max) throw err(`${where} is a mode number 1..${max}`);
   return id;
 };
+const modeCount = (info) => (info.engine >= 6 ? info.modes : P.KA.MODES);
+const condCount = (info) => (info.engine >= 6 ? info.conditions : P.KA.CONDS);
 function dupName(list) {
   const named = list.filter((m) => m.name).map((m) => m.name.toLowerCase());
   return named.find((n, i) => named.indexOf(n) !== i);
@@ -72,8 +79,9 @@ module.exports = {
     return r;
   },
 
-  // { entries (keys that can have a map), maxRules, used, recordBytes, engine (1 .. 5), conditions,
-  //   modes, activeModes (bit n-1 = mode n) }
+  // { entries (records: keys that can have a map; engine 6: records, a key takes one per 6 rules),
+  //   maxRules, used, recordBytes, engine (1 .. 6), conditions, modes, activeModes (bit n-1 = mode n);
+  //   engine 6: pool { bytes, used }, imageBytes, bank, maxParts }
   async keyActionsInfo() {
     await this._requireKeyActions();
     return this._kaInfo();
@@ -89,16 +97,19 @@ module.exports = {
     return info;
   },
 
-  // [{ id, name, active }] for modes 1..3 (name '' = unnamed)
+  // [{ id, name, active }] for modes 1..3 (engine 6: 1..32, and flash: the mode's own flash settings when
+  // it has them) (name '' = unnamed)
   async getModes() {
-    await this._requireModes();
-    return this._kaModes();
+    const info = await this._requireModes();
+    return this._kaModes(info);
   },
-  async _kaModes() {
+  async _kaModes(info) {
+    const inf = info ?? await this._kaInfo();
     const out = [];
-    for (let id = 1; id <= P.KA.MODES; id++) {
+    for (let id = 1; id <= modeCount(inf); id++) {
       const m = P.parseKaMode(await this._kaTableQuery(P.kaModeGetPacket(id), 'mode'));
-      out.push({ id, name: m.name, active: Boolean(m.active & (1 << (id - 1))) });
+      const on = inf.engine >= 6 ? (inf.activeModes >>> (id - 1)) & 1 : m.active & (1 << (id - 1));
+      out.push({ id, name: m.name, active: Boolean(on), ...(m.flash && { flash: m.flash }) });
     }
     return out;
   },
@@ -107,23 +118,47 @@ module.exports = {
   async setModeName(id, name) {
     checkModeId(id);
     const clean = checkModeName(name);
-    await this._requireModes();
-    const modes = await this._kaModes();
+    const info = await this._requireModes();
+    checkModeId(id, 'id', modeCount(info));
+    const modes = await this._kaModes(info);
     if (dupName(modes.map((m) => (m.id === id ? { ...m, name: clean } : m)))) throw err(`another mode is already called "${clean}"`);
     await this._kaTableQuery(P.kaModeSetPacket(id, clean), 'mode name');
-    return this._kaModes();
+    return this._kaModes(info);
   },
 
-  // the 15 condition entries (entry n at [n - 1])
-  async _kaConds() {
+  // engine 6: a mode's own flash settings { enter?, enterColor?, leave?, leaveColor? } (missing fields stay;
+  // without settings yet: flash on, the default colours). Returns getModes().
+  async setModeFlash(id, flash) {
+    checkModeId(id);
+    if (!isObj(flash)) throw err('flash is { enter?, enterColor?, leave?, leaveColor? }');
+    const info = await this._requireModes();
+    if (info.engine < 6) throw err('Per-mode flash settings in the mode need key action engine 6 (modes 1..3: firmware options modeFlash)');
+    checkModeId(id, 'id', modeCount(info));
+    const m = (await this._kaModes(info))[id - 1];
+    const cur = m.flash ?? { enter: true, enterColor: [0, 0, 0], leave: true, leaveColor: [0, 0, 0] };
+    const next = { ...cur };
+    for (const [k, v] of Object.entries(flash)) {
+      if (k === 'enter' || k === 'leave') { if (typeof v !== 'boolean') throw err(`flash.${k} is true or false`); next[k] = v; }
+      else if (k === 'enterColor' || k === 'leaveColor') {
+        if (!Array.isArray(v) || v.length !== 3 || !v.every((c) => Number.isInteger(c) && c >= 0 && c <= 255)) throw err(`flash.${k} is [r, g, b] 0..255`);
+        next[k] = [...v];
+      } else throw err(`flash: unknown field "${k}"`);
+    }
+    await this._kaTableQuery(P.kaModeSetPacket(id, m.name, next), 'mode flash');
+    return this._kaModes(info);
+  },
+
+  // the condition entries (entry n at [n - 1]): 15, engine 6: as many as the keyboard has
+  async _kaConds(info) {
+    const n = condCount(info ?? await this._kaInfo());
     const out = [];
-    for (let i = 1; i <= P.KA.CONDS; i++) out.push(P.parseKaCond(await this._kaTableQuery(P.kaCondGetPacket(i), 'condition')).entry);
+    for (let i = 1; i <= n; i++) out.push(P.parseKaCond(await this._kaTableQuery(P.kaCondGetPacket(i), 'condition')).entry);
     return out;
   },
 
   // raw writes for backups (key-map-backup.js checked the values)
   async _kaSetCond(idx, entry) { await this._kaTableQuery(P.kaCondSetPacket(idx, entry), 'condition'); },
-  async _kaSetModeName(id, name) { await this._kaTableQuery(P.kaModeSetPacket(id, name), 'mode name'); },
+  async _kaSetModeName(id, name, flash) { await this._kaTableQuery(P.kaModeSetPacket(id, name, flash), 'mode name'); },
 
   // fromRecord's context: conditions, mode names and key names
   _kaCtx(conds, modes, keys) {
@@ -137,31 +172,51 @@ module.exports = {
     await this._requireKeyActions();
     const info = await this._kaInfo();
     const keys = await this.listKeys();
-    const ctx = info.engine >= 2 ? this._kaCtx(await this._kaConds(), await this._kaModes(), keys) : this._kaCtx(null, null, keys);
+    const ctx = info.engine >= 2 ? this._kaCtx(await this._kaConds(info), await this._kaModes(info), keys) : this._kaCtx(null, null, keys);
     if (key !== undefined) {
       const { slot, name } = await this._kaKey(key);
-      const r = await this._kaQuery(P.kaGetPacket(slot));
-      return r[2] === 1 ? null : fromRecord(r.slice(8, 64), name, ctx);
+      const parts = await this._kaParts(slot, info);
+      return parts.length ? fromRecord(mergeParts(parts), name, ctx) : null;
     }
-    return (await this._kaRecords()).map(({ slot, record }) => fromRecord(record, ctx.keyName(slot), ctx));
+    const recs = await this._kaRecords(info);
+    const slots = [...new Set(recs.map((r) => r.slot))];
+    return slots.map((slot) => fromRecord(mergeParts(recs.filter((r) => r.slot === slot).map((r) => r.record)), ctx.keyName(slot), ctx));
   },
 
-  // every map as the raw 56-byte record: [{ slot, record }] (backups, key-map-backup.js)
+  // every map as the raw 56-byte record: [{ slot, record }] (backups, key-map-backup.js); engine 6: one
+  // entry per record, so a key with more parts is there more than once (record [6] = its part)
   async keyActionRecords() {
     await this._requireKeyActions();
     return this._kaRecords();
   },
 
-  // the whole table, raw: { engine, records, conditions?, modeNames? } (engine 2 adds the last two)
+  // the whole table, raw: { engine, records, conditions?, modeNames? } (engine 2 adds the last two; engine 6
+  // also modeFlash: per mode its own flash settings or null)
   async keyActionTable() {
     await this._requireKeyActions();
-    const { engine } = await this._kaInfo();
-    const records = await this._kaRecords();
+    const info = await this._kaInfo();
+    const { engine } = info;
+    const records = await this._kaRecords(info);
     if (engine < 2) return { engine, records };
-    return { engine, records, conditions: await this._kaConds(), modeNames: (await this._kaModes()).map((m) => m.name) };
+    const modes = await this._kaModes(info);
+    return { engine, records, conditions: await this._kaConds(info), modeNames: modes.map((m) => m.name),
+      ...(engine >= 6 && { modeFlash: modes.map((m) => m.flash ?? null) }) };
   },
 
-  async _kaRecords() {
+  // a key's records, part 0 first (engine 6 reads parts until one is missing)
+  async _kaParts(slot, info) {
+    const out = [];
+    const max = (info ?? await this._kaInfo()).engine >= 6 ? P.KA.MAX_PARTS : 1;
+    for (let part = 0; part < max; part++) {
+      const r = await this._kaQuery(P.kaGetPacket(slot, part));
+      if (r[2] !== 0) break;
+      out.push(r.slice(8, 64));
+    }
+    return out;
+  },
+
+  async _kaRecords(info) {
+    const inf = info ?? await this._kaInfo();
     const slots = [];
     for (let start = 0; start < P.SLOTS;) {
       const r = await this._kaQuery(P.kaListPacket(start));
@@ -171,10 +226,7 @@ module.exports = {
       start = got[got.length - 1] + 1;
     }
     const out = [];
-    for (const slot of slots) {
-      const r = await this._kaQuery(P.kaGetPacket(slot));
-      if (r[2] === 0) out.push({ slot, record: r.slice(8, 64) });
-    }
+    for (const slot of slots) for (const record of await this._kaParts(slot, inf)) out.push({ slot, record });
     return out;
   },
 
@@ -210,15 +262,19 @@ module.exports = {
     if (!Array.isArray(maps)) throw err('maps is a list of key maps');
     if (!Array.isArray(remove)) throw err('remove is a list of keys (names or slots)');
     const at = (i) => (named ? `maps[${i}]` : '');
-    const loose = maps.map((spec, i) => { try { return parseSpec(spec); } catch (e) { throw prefixed(e, at(i)); } });
-    const names = modes === undefined ? null : this._kaModeList(modes);
+    // shapes first (nothing sent); the rule slot limit (6 per key before engine 6) is checked below
+    const loose = maps.map((spec, i) => { try { return parseSpec(spec, { ...M.LOOSE, parts: true }); } catch (e) { throw prefixed(e, at(i)); } });
+    const names0 = modes === undefined ? null : this._kaModeList(modes);
     await this._requireKeyActions();
     const info = await this._kaInfo();
-    const v2 = info.engine >= 2;
+    const v2 = info.engine >= 2, v6 = info.engine >= 6;
+    const names = names0 && this._kaModeList(modes, v2 ? modeCount(info) : P.KA.MODES);
     if (!v2 && (names || loose.some(usesModes))) throw err(NEEDS_V2);
     if (info.engine < 5 && loose.some(M.usesNotHeld)) throw err(NEEDS_V5);
     if (info.engine < 4 && loose.some(M.speedByPressure)) throw err(NEEDS_V4);
     if (info.engine < 3 && loose.some(M.sharesSpeed)) throw err(NEEDS_V3);
+    // FLASH rules (output 11): caps 'modeFlash', not an engine version (the engine stays 5)
+    if (loose.some(usesFlash) && !(await this.getCaps()).features.includes('modeFlash')) throw err(NEEDS_FLASH);
 
     const keys = await this.listKeys();
     const slotOf = (ref, where) => {
@@ -236,7 +292,7 @@ module.exports = {
     const twice = all.find((s, i) => all.indexOf(s) !== i);
     if (twice !== undefined) throw err(`${keyName(twice) ?? `slot ${twice}`} is in the batch twice`);
 
-    const curModes = v2 ? await this._kaModes() : null;
+    const curModes = v2 ? await this._kaModes(info) : null;
     const finalModes = curModes && curModes.map((m) => ({ ...m, name: names?.find((x) => x.id === m.id)?.name ?? m.name }));
     if (finalModes && dupName(finalModes)) throw err(`two modes would be called "${dupName(finalModes)}"`);
     const modeOf = (ref, where) => {
@@ -246,33 +302,55 @@ module.exports = {
       return hit.id;
     };
     const wires = maps.map((spec, i) => {
-      try { return parseSpec(spec, { slotOf: (k, w) => slotOf(M.LOOSE.slotOf(k), w), modeOf, self: slots[i] }); } catch (e) { throw prefixed(e, at(i)); }
+      try { return parseSpec(spec, { slotOf: (k, w) => slotOf(M.LOOSE.slotOf(k), w), modeOf, self: slots[i], parts: v6 }); } catch (e) { throw prefixed(e, at(i)); }
     });
+    if (!v6 && wires.some(M.usesHighModes)) throw err(NEEDS_V6);
+    const highest = Math.max(0, ...wires.flatMap((w) => w.rules.flatMap((x) => [...(x.need?.on ?? []), ...(x.need?.off ?? []),
+      ...(x.output === M.OUT.MODE && x.trigger !== P.KA.ARG ? [x.a] : [])])));
+    if (v2 && highest > modeCount(info)) throw err(`mode ${highest}: the keyboard has modes 1..${modeCount(info)}`);
 
-    const current = await this._kaRecords();
+    const current = await this._kaRecords(info);
     const touched = new Set(all);
-    const after = new Set(current.map((r) => r.slot).filter((s) => !touched.has(s)));
-    wires.forEach((w, i) => { if (w.rules.length) after.add(slots[i]); });
-    if (after.size > info.entries) throw err(`the key action table is full: ${info.entries} keys can have a map, this would make ${after.size}`);
+    // records after the write: the untouched keys' plus each new map's parts (engine 6: one per 6 rule slots)
+    const after = current.filter((r) => !touched.has(r.slot)).length + wires.reduce((n, w) => n + splitParts(w.rules).length, 0);
+    if (after > info.entries) {
+      throw err(v6 ? `the key action table is full: the keyboard holds ${info.entries} records (6 rule slots each), this would make ${after}`
+        : `the key action table is full: ${info.entries} keys can have a map, this would make ${after}`);
+    }
 
-    // conditions: reuse identical entries, allocate free ones; nothing written yet
-    const conds = v2 ? await this._kaConds() : null;
+    // conditions: reuse identical entries, allocate free ones; nothing written yet. A record's conditions
+    // lie in one bank of 15 entries (engine 6; before it the table is the one bank).
+    const conds = v2 ? await this._kaConds(info) : null;
     const table = conds && conds.map((e) => [...e]);
     const keep = new Set(current.filter((r) => !touched.has(r.slot)).flatMap((r) => refsOf(r.record)));
     const used = new Set(), changed = new Set();
-    const condIndex = (entry) => {
-      let i = table.findIndex((e) => !M.isFree(e) && M.sameEntry(e, entry));
-      if (i < 0) {
-        const open = [...table.keys()].filter((k) => !keep.has(k + 1) && !used.has(k + 1));
-        i = open.find((k) => M.isFree(table[k])) ?? open[0] ?? -1;
-        if (i < 0) throw err(`the condition table is full (${P.KA.CONDS} entries): these maps need more different conditions than fit`);
-        table[i] = entry;
-        changed.add(i + 1);
+    const BANK = P.KA.BANK, banks = table ? Math.max(1, Math.ceil(table.length / BANK)) : 0;
+    const find = (entry, lo, hi) => { for (let i = lo; i < hi; i++) if (!M.isFree(table[i]) && M.sameEntry(table[i], entry)) return i; return -1; };
+    const open = (lo, hi) => { const o = []; for (let k = lo; k < hi; k++) if (!keep.has(k + 1) && !used.has(k + 1)) o.push(k); return o; };
+    const bankFor = (entries) => {
+      const uniq = entries.filter((e, i) => entries.findIndex((x) => M.sameEntry(x, e)) === i);
+      let best = null;
+      for (let b = 0; b < banks && best?.missing !== 0; b++) {
+        const lo = b * BANK, hi = Math.min(lo + BANK, table.length);
+        const missing = uniq.filter((e) => find(e, lo, hi) < 0).length;
+        if (missing <= open(lo, hi).length && (!best || missing < best.missing)) best = { b, missing };
       }
-      used.add(i + 1);
-      return i + 1;
+      if (!best) throw err(`the condition table is full (${table.length} entries): these maps need more different conditions than fit`);
+      const lo = best.b * BANK, hi = Math.min(lo + BANK, table.length);
+      return { bank: best.b, condIndex: (entry) => {
+        let i = find(entry, lo, hi);
+        if (i < 0) {
+          const o = open(lo, hi);
+          i = o.find((k) => M.isFree(table[k])) ?? o[0] ?? -1;
+          if (i < 0) throw err(`the condition table is full (${table.length} entries): these maps need more different conditions than fit`);
+          table[i] = entry;
+          changed.add(i + 1);
+        }
+        used.add(i + 1);
+        return i + 1;
+      } };
     };
-    const records = wires.map((w, i) => (w.rules.length ? toRecord(w, slots[i], v2 ? condIndex : undefined) : P.encodeKaRecord({ slot: slots[i] })));
+    const records = wires.map((w, i) => (w.rules.length ? toRecords(w, slots[i], v2 ? bankFor : undefined) : [P.encodeKaRecord({ slot: slots[i] })]));
     const clear = v2 ? [...table.keys()].map((k) => k + 1).filter((n) => !M.isFree(table[n - 1]) && !keep.has(n) && !used.has(n)) : [];
 
     // writes
@@ -282,27 +360,32 @@ module.exports = {
     for (const n of changed) if (table[n - 1].join() !== conds[n - 1].join()) await this._kaSetCond(n, table[n - 1]);
     const stored = [];
     for (let i = 0; i < maps.length; i++) {
-      const r = await this._kaQuery(P.kaSetPacket(slots[i], records[i]));
-      stored.push(r.slice(8, 64));
+      const got = [];
+      for (const rec of records[i]) got.push((await this._kaQuery(P.kaSetPacket(slots[i], rec))).slice(8, 64));
+      const had = current.filter((r) => r.slot === slots[i]).map((r) => r.record[6] ?? 0);
+      for (const part of had) {                        // engine 6: parts the key no longer has
+        if (records[i][0][1] && part >= records[i].length) await this._kaQuery(P.kaSetPacket(slots[i], P.encodeKaRecord({ slot: slots[i], part })));
+      }
+      stored.push(got);
     }
     for (const slot of gone) await this._kaQuery(P.kaSetPacket(slot, P.encodeKaRecord({ slot })));
     for (const n of clear) { await this._kaSetCond(n, P.KA_COND_FREE); table[n - 1] = [...P.KA_COND_FREE]; }
 
     const ctx = this._kaCtx(table, finalModes, keys);
     return {
-      maps: stored.map((rec, i) => (rec[1] ? fromRecord(rec, keyName(slots[i]) ?? undefined, ctx)
+      maps: stored.map((recs, i) => (recs[0][1] ? fromRecord(mergeParts(recs), keyName(slots[i]) ?? undefined, ctx)
         : { ...(keyName(slots[i]) && { key: keyName(slots[i]) }), slot: slots[i], removed: true })),
       removed: gone.map((slot) => ({ key: keyName(slot), slot })),
       ...(finalModes && { modes: finalModes.map(({ id, name }) => ({ id, name })) }),
     };
   },
 
-  // modes: [{ id, name }] -> checked list
-  _kaModeList(modes) {
+  // modes: [{ id, name }] -> checked list (ids 1..max)
+  _kaModeList(modes, max = P.KA.MAX_MODES) {
     if (!Array.isArray(modes)) throw err('modes is a list of { id, name }');
     const out = modes.map((m, i) => {
-      if (!isObj(m) || Object.keys(m).some((k) => !['id', 'name', 'active'].includes(k))) throw err(`modes[${i}] is { id, name }`);
-      return { id: checkModeId(m.id, `modes[${i}].id`), name: checkModeName(m.name, `modes[${i}].name`) };
+      if (!isObj(m) || Object.keys(m).some((k) => !['id', 'name', 'active', 'flash'].includes(k))) throw err(`modes[${i}] is { id, name }`);
+      return { id: checkModeId(m.id, `modes[${i}].id`, max), name: checkModeName(m.name, `modes[${i}].name`) };
     });
     if (out.some((m, i) => out.findIndex((x) => x.id === m.id) !== i)) throw err('modes names a mode twice');
     return out;

@@ -313,3 +313,14 @@ test('MCP: get_key_actions and set_key_actions with examples', () => {
   assert.ok(!t.set_key_actions.inputSchema.safeParse({ key: 'W', rules: new Array(7).fill({}) }).success);
   assert.ok(t.get_key_actions.inputSchema.safeParse({}).success);
 });
+
+test('Questions view: a flash rule (no mode) is kept as it is, never given a mode, and reads in the summary', () => {
+  const stored = K.fromRecord(rec({ key: 'W', rules: [{ when: 'press', do: { flash: [255, 0, 255], times: 5 } }, { when: 'hold', ms: 500, do: { gamepad: 'B' } }] }), 'W');
+  const a = C.specToAnswers(stored);
+  assert.strictEqual(a.answers.light.do, null, 'no question takes the flash');
+  assert.deepStrictEqual(a.extra, [{ when: 'press', do: { flash: '#ff00ff', times: 5 } }]);
+  const spec = C.answersToSpec({ key: 'W', ...a });
+  assert.deepStrictEqual(spec.rules.at(-1), { when: 'press', do: { flash: '#ff00ff', times: 5 } });
+  assert.deepStrictEqual(rec(spec), rec({ key: 'W', rules: [{ when: 'hold', ms: 500, do: { gamepad: 'B' } }, { when: 'press', do: { flash: '#ff00ff', times: 5 } }] }), 'saves back');
+  assert.deepStrictEqual(C.summary({ rules: a.extra }), ['Light press: flashes the hold bar 5 times in #ff00ff.']);
+});

@@ -108,7 +108,11 @@ kb.key('E').when('hold', 300).if({ held: ['Fn'] }).mode('press').do(kb.gamepad.b
 - `do`: `kb.send('Ctrl+C')`, `kb.mouse.button('L')`, `kb.mouse.move('up', opts)`, `kb.mouse.scroll('down')`,
   `kb.mouse.jump(dx, dy)`, `kb.mouse.glide(dx, dy, ms)`, `kb.mouse.wheel(n)`, `kb.gamepad.button('A')`,
   `kb.gamepad.axis('LY-', 40)`, `kb.gamepad.axisDepth('RT', 0.5, 3)`, `mode.enter()` / `.leave()` /
-  `.toggle()`, `kb.leaveAllModes()`, or the driver's JSON (`{ key: 'Esc' }`).
+  `.toggle()`, `kb.leaveAllModes()`, `kb.flash(color, times)`, or the driver's JSON (`{ key: 'Esc' }`).
+- `kb.flash('magenta', 5)` (feature 'modeFlash'): the hold bar column (Home, Del, PgUp, PgDn, Right) flashes
+  `times` times (1..15, default 3) in the colour (any colour form, default green). It fires once, with any
+  trigger and `if`; it takes no `.mode()` (on the keyboard the rule's mode byte is the count). Black is an
+  error: the keyboard reads 0, 0, 0 as "the default green". JSON: `{ flash: [255, 0, 255] | '#ff00ff' | true, times: 5 }`.
 - Mouse move / scroll options: `start`, `max`, `rampMs`, `curve`, `power`; `shareSpeed` + `keepMs` (engine 3);
   `speedBy: 'time'` (default, the speed builds over `rampMs`), `'pressure'` (the speed follows how deep the key
   is: start speed at `pressFrom`, max at `pressTo` mm and deeper, nothing moves while shallower than `pressFrom`;
@@ -117,6 +121,12 @@ kb.key('E').when('hold', 300).if({ held: ['Fn'] }).mode('press').do(kb.gamepad.b
   `kb.mouse.move('up', { speedBy: 'pressure', pressFrom: 0.5, pressTo: 3.2 })`.
 - Modes: `const m = kb.mode('Mouse')` declares a mode name (it reuses the keyboard's mode of that name,
   else a free one of the 3); `m.remap('H', 'Left')` = "in this mode, H acts as Left".
+- Mode flash (feature 'modeFlash'): `kb.mode('Tilde', { flash, leaveFlash })` (or `kb.mode('Tilde', 2, { ... })`)
+  sets how the keyboard shows the mode turning on / off: the hold bar column flashes 3 times when it turns
+  on (`flash`, default green) and once when it turns off (`leaveFlash`, default dim white #404040; not red,
+  the Esc hold bar already flashes red). Each is `true` (on, default colour), `false` (off) or a colour (on,
+  that colour); both are on by default, and a `kb.mode` without options leaves them as they are. Black is an
+  error (0, 0, 0 means the default on the keyboard). A firmware option per mode 1..3, saved on the keyboard.
 - `key.actionMap({ press, gap, alsoType })` sets the map's own options.
 - `kb.resetKeyActions()` removes the keyboard's other maps (otherwise they are kept).
 
@@ -130,7 +140,8 @@ test is an error that says why (no "or": make two rules; no depth as a condition
 `kb.profile(n)` (made active first; check then lists the per-profile parts as planned and compares them on
 apply), `kb.macro(i, 'text' | { text | steps, repeat, delayMs })`, `kb.text(i, 'text')`, `kb.options({ antiMistouch,
 rtStability, wasdSwap })` (the OS mode has no setter in the driver: `os` other than 'win' is an error),
-`kb.pollingRate(hz)`, `kb.firmwareOptions({ ... })`, `kb.textTyping('block')`, `kb.gamepad.settings({ ... })`,
+`kb.pollingRate(hz)`, `kb.firmwareOptions({ ... })`, `kb.textTyping('block')`, `kb.holdBar({ on, color, escColor })`,
+`kb.mode(name, { flash, leaveFlash })`, `kb.gamepad.settings({ ... })`,
 `key.bindGamepad('ly-')` / `kb.gamepad.bind(key, target)`, `kb.sequence(text)` (played after the writes, on apply
 only), and `kb.firmware.has('feature')` to branch on what the keyboard has.
 
@@ -199,6 +210,19 @@ for (const [key, arrow] of Object.entries(arrows)) nav.remap(key, arrow);
 kb.key('Caps').modTap('LCtrl', 'Esc', 200);
 ```
 
+### A Tilde mode the keyboard shows: the hold bar column flashes when it turns on / off; kb.flash (mode-flash)
+
+```js
+// Fn + Ctrl + B toggles a Tilde mode; in it Esc types `.
+// The hold bar column (Home .. Right) flashes 3 times cyan when the mode turns on,
+// once in the default dim white when it turns off (needs feature 'modeFlash').
+const tilde = kb.mode('Tilde', { flash: 'cyan', leaveFlash: true });
+kb.key('B').when('press').if({ held: ['Fn', 'LCtrl'] }).do(tilde.toggle());
+tilde.remap('Esc', '`');
+// Fn + P: 5 magenta flashes, to see that the keyboard's rules run
+kb.key('P').when('press').if({ held: ['Fn'] }).do(kb.flash('magenta', 5));
+```
+
 ### Text keys, a macro and the Fn layer (texts-macros)
 
 ```js
@@ -221,6 +245,18 @@ kb.textTyping('block');
 kb.lighting.effect('wave', { direction: 'left', speed: 3 }).color('rgb(255, 0, 128)').brightness(4);
 ```
 
+`kb.holdBar({ on: true, color: 'cyan' })` sets the hold progress bar (feature 'holdBar'): while a key action
+HOLD rule builds up, Home, Del, PgUp, PgDn and Right fill over its hold time and flash 3 times when it fires.
+Default on, green. `escColor` is its colour while an Esc hold drives it (Fn+Esc 2 s leave-all-modes, a
+HOLD rule on Esc), default red. A firmware option, saved on the keyboard.
+
+`kb.mode('Tilde', { flash: 'cyan', leaveFlash: false })` sets the same column's mode flash (feature
+'modeFlash'): 3 flashes when the mode turns on, 1 when it turns off, per mode; it shows with the hold bar
+switched off too. The plan carries it as `fwOptions.modeFlash: [{ mode, enter?, enterColor?, leave?,
+leaveColor? }]` (only what the script sets); check lists and apply writes only the fields that differ, and
+the driver keeps every other option byte as the keyboard has it (read, change, write). Firmware older than
+it (24 option bytes) or built without it: an error, nothing is written.
+
 The mouse-mode example is `tests/fixtures/ka-mouse-mode.json` as code: it compiles to exactly that
 file's `{ modes, maps }`, and applying it writes the same records, conditions and mode names (a test checks
 both).
@@ -235,7 +271,7 @@ both).
   remap: [{ layer, os?, slot, key, value, bytes }], macros: [{ index, repeat, steps, text? }], texts: [{ index, text }],
   advanced: [{ slot, key, kind: 'modtap' | 'toggle' | 'snap' | 'dks' | 'plain', ... }],
   lighting: { mode, speed, brightness, option, r, g, b, rainbow, presetColour }, picture: { index, colors: { slot: '#rrggbb' }, fill, show },
-  options, pollingRateHz, fwOptions, gamepad: { settings, bindings: [{ key, slot, target }] },
+  options, pollingRateHz, fwOptions (modeFlash: [{ mode, enter?, enterColor?, leave?, leaveColor? }]), gamepad: { settings, bindings: [{ key, slot, target }] },
   keyActions: { modes: [{ id, name }], maps: [{ key, press?, gap?, alsoType?, rules }], replace? },
   sequence: { text, stopOnKey, steps, ms } }
 ```

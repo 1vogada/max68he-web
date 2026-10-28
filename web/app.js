@@ -471,7 +471,8 @@ const TITLES = {
   actuation: 'Actuation point', rt: 'Rapid trigger', travel: 'Analog view', keymap: 'Remap', fn: 'Remap',
   layers: 'Remap', stats: 'Key stats',
   analog: 'Gamepad', wizard: 'Key wizard', advanced: 'Advanced keys', macros: 'Advanced keys', texts: 'Advanced keys', lighting: 'RGB settings', paint: 'RGB settings',
-  settings: 'General settings', updates: 'Updates', interface: 'Interface',
+  fwopts: 'Firmware', features: 'Firmware', updates: 'Firmware',
+  settings: 'General settings', interface: 'Interface',
 };
 
 const HINTS = {
@@ -491,7 +492,9 @@ const HINTS = {
   paint: 'Paint keys in your own colours and keep up to five pictures. Click or drag across keys to paint; Save sends the picture to the keyboard and shows it.',
   quick: 'The settings you change most, at a glance. Click a card to open its page.',
   profiles: 'The keyboard keeps four profiles on board; the active one is what every page shows and edits. Back one up to a file or load one from a file.',
-  settings: 'Polling rate, keyboard and firmware options, and key calibration.',
+  settings: 'Polling rate, keyboard options, key calibration and speed.',
+  fwopts: 'What the open firmware does on its own: indicators, idle lighting, how text keys type, the hold bar and mode flashes. Saved on the keyboard.',
+  features: 'Which parts of the open firmware a custom build has. Switch off what you don\'t use, see what it frees, then build and flash it.',
   updates: 'Put new firmware on the keyboard, or go back to the stock firmware.',
   interface: 'How this page looks and which extra pages it shows. Nothing here changes the keyboard.',
   'wizard:code': 'Describe the keyboard in a short script: keys, actuation, layers, lighting, macros, key actions. Check shows what would change; Apply writes it. Click a key on the board to put its name in the script.',

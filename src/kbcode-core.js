@@ -216,18 +216,22 @@ function buildPlan(ops, state = null) {
   // ---- modes first (rules and layers refer to them by name) ----
   const modes = [];          // [{ id, name, at }]
   const boardModes = state?.modes ?? null;
+  // modes the keyboard has: 3 (engine 2..5), 32 (engine 6); without a keyboard any of 1..32 checks
+  const modeMax = known ? (boardModes?.length || P.KA.MODES) : P.KA.MAX_MODES;
   for (const o of list.filter((x) => x.op === 'mode')) {
     const name = typeof o.name === 'string' ? o.name.trim() : o.name;
     if (typeof name !== 'string' || !name) { err(o.at, 'kb.mode takes a name like "Mouse"'); continue; }
     try { P.encodeModeName(name); } catch (e) { err(o.at, `mode name ${show(name)}: ${e.message}`); continue; }
-    if (o.id !== undefined && (!Number.isInteger(o.id) || o.id < 1 || o.id > P.KA.MODES)) { err(o.at, `mode number is 1..${P.KA.MODES}, not ${show(o.id)}`); continue; }
+    if (o.id !== undefined && (!Number.isInteger(o.id) || o.id < 1 || o.id > modeMax)) { err(o.at, `mode number is 1..${modeMax}, not ${show(o.id)}`); continue; }
+    const flash = o.flash === undefined ? null : parseModeFlashOpts(o.flash, o.at);
     const same = modes.find((m) => m.name.toLowerCase() === name.toLowerCase());
     if (same) {
       if (o.id !== undefined && same.id !== undefined && same.id !== o.id) err(o.at, `mode "${name}" is already mode ${same.id}`);
       else if (o.id !== undefined) same.id = o.id;
+      if (flash) { same.flash = { ...same.flash, ...flash }; same.flashAt = o.at; }
       continue;
     }
-    modes.push({ name, id: o.id, at: o.at });
+    modes.push({ name, id: o.id, at: o.at, ...(flash && { flash, flashAt: o.at }) });
   }
   for (const m of modes) {   // ids: given, else the keyboard's mode of that name, else a free one
     if (m.id !== undefined) {
@@ -240,12 +244,12 @@ function buildPlan(ops, state = null) {
     const onBoard = boardModes?.find((b) => b.name && b.name.toLowerCase() === m.name.toLowerCase());
     const taken = (id) => modes.some((x) => x !== m && x.id === id);
     if (onBoard && !taken(onBoard.id)) { m.id = onBoard.id; continue; }
-    const free = [1, 2, 3].filter((id) => !taken(id));
+    const free = Array.from({ length: modeMax }, (_, i) => i + 1).filter((id) => !taken(id));
     const id = boardModes ? free.find((i) => !boardModes[i - 1]?.name) : free[0];
     if (id === undefined) {
       err(m.at, boardModes && free.length
-        ? `all ${P.KA.MODES} modes already have names on the keyboard (${boardModes.map((b) => b.name || '-').join(', ')}): give a number to reuse one, like kb.mode(${show(m.name)}, ${free[0]})`
-        : `at most ${P.KA.MODES} modes`);
+        ? `all ${modeMax} modes already have names on the keyboard (${boardModes.map((b) => b.name || '-').join(', ')}): give a number to reuse one, like kb.mode(${show(m.name)}, ${free[0]})`
+        : `at most ${modeMax} modes`);
       continue;
     }
     m.id = id;
@@ -265,6 +269,17 @@ function buildPlan(ops, state = null) {
     err(modes[0].at, 'modes need a newer open firmware (key action engine 2)');
   } else if (modes.length) {
     plan.keyActions ={ modes: modes.filter((m) => m.id !== undefined).map((m) => ({ id: m.id, name: m.name })).sort((a, b) => a.id - b.id), maps: [] };
+  }
+  // kb.mode(name, { flash, leaveFlash }) -> firmware options modeFlash (caps 'modeFlash') for modes 1..3,
+  // the mode's own flash settings (engine 6, setModeFlash) for modes 4..32
+  const flashModes = modes.filter((m) => m.flash && m.id !== undefined);
+  if (flashModes.length && needOpen(flashModes[0].flashAt, 'Mode flash')) {
+    if (known && !has('modeFlash')) err(flashModes[0].flashAt, 'Mode flash needs a newer open firmware (feature "modeFlash")');
+    else {
+      const low = flashModes.filter((m) => m.id <= P.KA.MODES), high = flashModes.filter((m) => m.id > P.KA.MODES);
+      if (low.length) plan.fwOptions = { modeFlash: low.map((m) => ({ mode: m.id, ...m.flash })).sort((a, b) => a.mode - b.mode) };
+      if (high.length) plan.modeFlash = high.map((m) => ({ mode: m.id, ...m.flash })).sort((a, b) => a.mode - b.mode);
+    }
   }
 
   // ---- everything else, in script order ----
@@ -444,6 +459,7 @@ function buildPlan(ops, state = null) {
         else plan.pollingRateHz = o.value;
         break;
       case 'fwOptions': parseFwOptions(o.value, at); break;
+      case 'holdBar': parseHoldBar(o.value, at); break;
       default: err(at, `unknown operation ${o.op}`);
     }
   }
@@ -664,6 +680,42 @@ function buildPlan(ops, state = null) {
     if (Object.keys(out).length) plan.options = out;
   }
 
+  // kb.holdBar({ on, color, escColor }) -> firmware options holdBar / holdBarColor / holdBarEscColor (caps 'holdBar')
+  function parseHoldBar(v, at) {
+    if (v.$bad || !Object.keys(v).length) { err(at, 'kb.holdBar({ on?, color?, escColor? })'); return; }
+    if (!needOpen(at, 'Hold progress bar')) return;
+    if (known && !has('holdBar')) { err(at, 'Hold progress bar needs a newer open firmware (feature "holdBar")'); return; }
+    const out = { ...plan.fwOptions };
+    for (const [k, x] of Object.entries(v)) {
+      if (k === 'on') { if (typeof x !== 'boolean') err(at, 'on is true or false'); else out.holdBar = x; } else if (k === 'color') {
+        try { out.holdBarColor = parseColor(x); } catch (e) { err(at, `color: ${e.message}`); }
+      } else if (k === 'escColor') {
+        try { out.holdBarEscColor = parseColor(x); } catch (e) { err(at, `escColor: ${e.message}`); }
+      } else err(at, `unknown hold bar option "${k}" (on, color, escColor)`);
+    }
+    plan.fwOptions = out;
+  }
+
+  // kb.mode(name, { flash, leaveFlash }): true = on in the default colour (green / dim white), false = off,
+  // a colour = on in it. Black is refused (0,0,0 means the default on the keyboard). -> { enter?, enterColor?,
+  // leave?, leaveColor? } or null
+  function parseModeFlashOpts(v, at) {
+    if (!isObj(v) || v.$bad || !Object.keys(v).length) { err(at, 'kb.mode(name, { flash?, leaveFlash? }): each true, false or a colour'); return null; }
+    const out = {};
+    const SIDE = { flash: ['enter', 'enterColor', P.MODE_FLASH.ENTER_DEFAULT], leaveFlash: ['leave', 'leaveColor', P.MODE_FLASH.LEAVE_DEFAULT] };
+    for (const [k, x] of Object.entries(v)) {
+      const side = SIDE[k];
+      if (!side) { err(at, `unknown mode option "${k}" (flash, leaveFlash)`); continue; }
+      const [on, color, def] = side;
+      if (typeof x === 'boolean') { out[on] = x; if (x) out[color] = [...def]; continue; }
+      let c;
+      try { c = parseColor(x); } catch (e) { err(at, `${k} is true, false or a colour: ${e.message}`); continue; }
+      if (!c.some(Boolean)) { err(at, `${k}: ${P.BLACK_FLASH}; use true for the default, false for no flash`); continue; }
+      out[on] = true; out[color] = c;
+    }
+    return Object.keys(out).length ? out : null;
+  }
+
   function parseFwOptions(v, at) {
     if (!isObj(v)) { err(at, 'kb.firmwareOptions({ ... }) takes an object'); return; }
     if (!needOpen(at, 'Firmware options')) return;
@@ -709,7 +761,7 @@ function buildPlan(ops, state = null) {
       if (!m) throw KA.fail(where, `no mode named "${ref}" (declare it: kb.mode(${show(ref)}))`);
       return m.id;
     };
-    const ctx = (self) => ({ slotOf: slotOfName, modeOf, self });
+    const ctx = (self) => ({ slotOf: slotOfName, modeOf, self, parts: !known || (state.engine ?? 0) >= 6 });
     const byKey = new Map();
     for (const { slot, rule, at } of ruleOps) {
       const r = normRule(rule, at);
@@ -724,12 +776,15 @@ function buildPlan(ops, state = null) {
       if (known && M.usesNotHeld(wire) && (state.engine ?? 0) < 5) { err(at, 'conditions with notHeld need a newer open firmware (key action engine 5)'); continue; }
       if (known && M.speedByPressure(wire) && (state.engine ?? 0) < 4) { err(at, 'mouse keys with speedBy pressure or both need a newer open firmware (key action engine 4)'); continue; }
       if (known && M.sharesSpeed(wire) && (state.engine ?? 0) < 3) { err(at, 'mouse keys with shareSpeed need a newer open firmware (key action engine 3)'); continue; }
+      if (known && M.usesFlash(wire) && !has('modeFlash')) { err(at, 'kb.flash needs a newer open firmware (feature "modeFlash")'); continue; }
       if (!byKey.has(slot)) byKey.set(slot, { rules: [], ats: [], wire: [] });
       const e = byKey.get(slot);
       e.rules.push(r); e.ats.push(at); e.wire.push(...wire.rules);
     }
     for (const [slot, o] of mapOpts) if (!byKey.has(slot)) err(o.at, `${keyName(slot)}: actionMap options without any .when(...).do(...) rule`);
     const entries = state?.entries ?? 16;
+    const v6 = known && (state.engine ?? 0) >= 6;
+    let records = 0;                 // engine 6: a key takes one record per 6 rule slots
     const conds = [];
     for (const [slot, e] of byKey) {
       const { at, ...opts } = mapOpts.get(slot) ?? {};
@@ -739,11 +794,16 @@ function buildPlan(ops, state = null) {
         continue;
       }
       for (const w of e.wire) if (w.need) { const c = M.condEntry(w.need); if (!conds.some((x) => M.sameEntry(x, c))) conds.push(c); }
-      if (ka.maps.length === entries) err(e.ats[0], `the key action table holds ${entries} keys; this is key ${entries + 1} (${keyName(slot)})`);
+      records += v6 ? KA.splitParts(e.wire).length : 1;
+      if (v6 ? records > entries && records - KA.splitParts(e.wire).length <= entries : ka.maps.length === entries) {
+        err(e.ats[0], v6 ? `the key action table holds ${entries} records (6 rule slots each); ${keyName(slot)} would make ${records}`
+          : `the key action table holds ${entries} keys; this is key ${entries + 1} (${keyName(slot)})`);
+      }
       if (!spec.key) delete spec.key;
       ka.maps.push(Object.fromEntries(Object.entries(spec).filter(([, v]) => v !== undefined)));
     }
-    if (conds.length > P.KA.CONDS) err(ruleOps[0].at, `these rules need ${conds.length} different conditions; the keyboard's condition table holds ${P.KA.CONDS}`);
+    const condMax = v6 ? state.conditions : P.KA.CONDS;
+    if (conds.length > condMax) err(ruleOps[0].at, `these rules need ${conds.length} different conditions; the keyboard's condition table holds ${condMax}`);
   }
 
   // a recorded rule -> the driver's rule JSON (aliases, names made canonical), or null
@@ -777,6 +837,10 @@ function buildPlan(ops, state = null) {
       r.if = c;
     }
     if (isObj(r.do) && typeof r.do.mode === 'string') r.do = { ...r.do, mode: modeByName(r.do.mode)?.name ?? r.do.mode };
+    if (isObj(r.do) && 'flash' in r.do && r.do.flash !== true) {   // kb.flash('cyan', 3): any colour form -> [r, g, b]
+      try { r.do = { ...r.do, flash: parseColor(r.do.flash) }; } catch (e) { err(at, `kb.flash colour: ${e.message}`); return null; }
+      if (!r.do.flash.some(Boolean)) { err(at, `kb.flash: ${P.BLACK_FLASH}; leave the colour out (or true) for the default green`); return null; }
+    }
     return Object.fromEntries(Object.entries(r).filter(([, v]) => v !== undefined));
   }
 }
@@ -952,8 +1016,14 @@ function diff(plan, cur, state = null) {
     add('options', `Polling rate: ${plan.pollingRateHz} Hz${c.pollingRateHz ? ` (was ${c.pollingRateHz})` : ''}`);
   }
   if (plan.fwOptions) {
-    const o = fields('options', 'Firmware options', plan.fwOptions, c.fwOptions, (v, k) => (k === 'capsColor' && Array.isArray(v) ? toHex(v) : JSON.stringify(v)));
-    if (o) writes.fwOptions = o;
+    const { modeFlash, ...rest } = plan.fwOptions;
+    const o = Object.keys(rest).length ? fields('options', 'Firmware options', rest, c.fwOptions, (v, k) => ((k === 'capsColor' || k === 'holdBarColor' || k === 'holdBarEscColor') && Array.isArray(v) ? toHex(v) : JSON.stringify(v))) : null;
+    const mf = modeFlash ? modeFlashDiff(modeFlash, c.fwOptions?.modeFlash) : null;
+    if (o || mf) writes.fwOptions = { ...o, ...(mf && { modeFlash: mf }) };
+  }
+  if (plan.modeFlash) {                // engine 6: modes 4..32 keep their flash settings in the mode
+    writes.modeFlash = plan.modeFlash;
+    for (const { mode, ...f } of plan.modeFlash) add('options', `Mode ${mode} flash: ${Object.entries(f).map(([k, v]) => `${k} ${Array.isArray(v) ? toHex(v) : v}`).join(', ')}`);
   }
   if (plan.gamepad) {
     const g = {};
@@ -1019,6 +1089,20 @@ function diff(plan, cur, state = null) {
       remove,
       ...(ka.replace && !curMaps && { replace: true }),
     };
+  }
+  // planned per-mode flash fields vs the keyboard's -> only the changed fields per mode (null: none)
+  function modeFlashDiff(planned, old) {
+    const out = [];
+    const name = (id) => plan.keyActions?.modes?.find((m) => m.id === id)?.name;
+    const txt = (k, v) => (k === 'enter' || k === 'leave' ? `${k} flash ${ON(v)}` : `${k === 'enterColor' ? 'enter' : 'leave'} colour ${toHex(v)}`);
+    for (const e of planned) {
+      const prev = old?.find((x) => x.mode === e.mode);
+      const changed = Object.entries(e).filter(([k, v]) => k !== 'mode' && JSON.stringify(prev?.[k]) !== JSON.stringify(v));
+      if (!changed.length) continue;
+      out.push({ mode: e.mode, ...Object.fromEntries(changed) });
+      add('options', `Mode ${e.mode}${name(e.mode) ? ` (${name(e.mode)})` : ''} flash: ${changed.map(([k, v]) => `${txt(k, v)}${prev ? was(k === 'enter' || k === 'leave' ? ON(prev[k]) : toHex(prev[k])) : ''}`).join(', ')}`);
+    }
+    return out.length ? out : null;
   }
   // rule `if.held` names -> slots (the board's live keymap may name keys differently)
   function slotRefs(r) {

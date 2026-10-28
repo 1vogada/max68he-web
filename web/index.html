@@ -43,9 +43,12 @@
       <p class="nav-group">Tools</p>
       <button data-view="travel"><span class="ico">◎</span>Analog view</button>
       <button data-view="stats" data-open-fw data-api="2"><span class="ico">▤</span>Key stats</button>
+      <p class="nav-group">Firmware</p>
+      <button data-view="fwopts" data-also="features updates"><span class="ico">⟳</span>Firmware</button>
+      <button data-view="features" data-sub hidden>Features &amp; size</button>
+      <button data-view="updates" data-sub hidden>Update</button>
       <p class="nav-group">Settings</p>
       <button data-view="settings"><span class="ico">⚙</span>General settings</button>
-      <button data-view="updates"><span class="ico">⟳</span>Updates</button>
       <button data-view="interface"><span class="ico">◐</span>Interface</button>
     </nav>
   </aside>
@@ -65,6 +68,8 @@
         <h1 id="page-title">Actuation point</h1>
         <div class="seg-tabs view-tabs" data-views="lighting paint" role="group" aria-label="RGB settings">
           <button type="button" data-goto="lighting">Effects</button><button type="button" data-goto="paint">Per-key colour</button></div>
+        <div class="seg-tabs view-tabs" data-views="fwopts features updates" role="group" aria-label="Firmware">
+          <button type="button" data-goto="fwopts">Options</button><button type="button" data-goto="features">Features &amp; size</button><button type="button" data-goto="updates">Update</button></div>
         <div class="seg-tabs view-tabs" data-views="advanced macros texts" role="group" aria-label="Advanced keys">
           <button type="button" data-goto="advanced">Advanced keys</button><button type="button" data-goto="macros">Macros</button><button type="button" data-goto="texts">Text keys</button></div>
         <div class="seg-tabs view-tabs" id="gp-tabs" data-views="analog" role="group" aria-label="Gamepad">
@@ -169,7 +174,7 @@
         </div>
         <div data-adv="snap" hidden>
           <label>Partner key <select name="partner"></select></label>
-          <p class="muted small">Pressing one key lets go of the other, so the two never cancel each other out (strafing left/right). Which one wins when both are down is set in Settings. You can also click the partner on the board.</p>
+          <p class="muted small">Pressing one key lets go of the other, so the two never cancel each other out (strafing left/right). Which one wins when both are down is set in Firmware → Options. You can also click the partner on the board.</p>
         </div>
         <div data-adv="modtap" class="grid2" hidden>
           <label>Hold <input name="hold" list="key-choices" spellcheck="false"></label>
@@ -225,6 +230,11 @@
           <div class="kw-side" data-nodirty>
             <div class="switch-viz-box" id="kw-gauge" title="Drag up and down on the gauge to set the depth of this question"></div>
             <p class="muted small kw-live" id="kw-live"></p>
+            <div class="kw-holdbar small" id="kw-holdbar" hidden title="While you hold a key for a hold rule, Home, Del, PgUp, PgDn and Right fill up, then flash 3 times when it fires. Also in Firmware → Options.">
+              <label class="toggle"><input type="checkbox" name="kwHoldBar"><span class="switch"></span> Hold progress bar</label>
+              <input type="color" name="kwHoldBarColor" aria-label="Hold bar colour" title="Hold bar colour">
+              <input type="color" name="kwHoldBarEscColor" aria-label="Hold bar colour for Esc holds" title="Colour for Esc holds (Fn+Esc, hold rules on Esc)">
+            </div>
           </div>
         </div>
       </section>
@@ -256,6 +266,7 @@
           Changes here are saved with "Save all to the keyboard" on the Blocks tab.</p>
         <div class="kb-modes" id="kb-modes-list" data-nodirty></div>
         <div class="row-buttons" data-nodirty><button type="button" id="kb-make-mode">Make a mode</button></div>
+        <div id="kb-mode-flash" data-nodirty hidden title="Saved to the keyboard at once (a firmware option). Also in Firmware → Options."></div>
       </section>
 
       <section class="panel wide kc" id="kc-panel" data-views="wizard" data-kw-tab="code">
@@ -440,7 +451,7 @@
         <details class="text-unicode">
           <summary>Special characters ( ͡° ͜ʖ ͡°): one-time setup</summary>
           <p class="small">The keyboard can only press keys, so for a special character it types the system's Unicode code
-            for it. Which system is set in General settings → Firmware options.</p>
+            for it. Which system is set in Firmware → Options.</p>
           <p class="small"><b>Windows</b> (once, then sign out and back in): run this in PowerShell, then it works in most programs.</p>
           <pre class="small"><code>Set-ItemProperty -Path 'HKCU:\Control Panel\Input Method' -Name EnableHexNumpad -Value '1'</code></pre>
           <p class="small"><b>Linux</b>: works in GTK / IBus programs as it is. <b>macOS</b>: add the "Unicode Hex Input" keyboard
@@ -519,44 +530,68 @@
           <span class="help">Filters tiny wobbles so rapid trigger doesn't fire by itself. Higher = steadier, but a little slower.</span></label>
       </form>
 
-      <form class="panel" id="fw-form" data-views="settings" autocomplete="off">
+      <form class="panel wide" id="fw-form" data-views="fwopts" autocomplete="off">
         <h2>Firmware options</h2>
-        <label class="toggle"><input type="checkbox" name="capsIndicator"><span class="switch"></span> Caps Lock lights the Caps key</label>
-        <label>Caps Lock colour <input type="color" name="capsColor"></label>
-        <label class="toggle"><input type="checkbox" name="layerIndicator"><span class="switch"></span> Show the active layer's keys</label>
-        <label class="toggle"><input type="checkbox" name="statusGuide"><span class="switch"></span> Fn status flashes</label>
-        <div class="field">
-          <label class="toggle"><input type="checkbox" name="fnHold"><span class="switch"></span> Fn layer pick only while held</label>
-          <p class="muted small">Fn + Home / Del / PgUp / PgDn picks Fn layer 1 / 2 / 3 / 4. Off: the pick stays until you pick another. On: it only applies while you hold that key.</p>
-        </div>
-        <label class="unicode-field">Special characters in text keys are typed for
-          <select name="unicode"><option value="windows">Windows</option><option value="linux">Linux</option><option value="mac">macOS</option></select>
-          <span class="help">How the keyboard enters characters a US keyboard doesn't have (é, °, ( ͡° ͜ʖ ͡°), emoji…). Windows needs a one-time setting, see the Text keys page.</span></label>
-        <div id="fw-text-typing"></div>
-        <div class="field">
-          <label class="toggle"><input type="checkbox" name="perf"><span class="switch"></span> Performance mode (lighting off)</label>
-          <p class="muted small">The keyboard stops drawing lighting effects and the LEDs stay off, so all its time goes to the keys. Game mode and calibration still light up.</p>
-        </div>
-        <label>Snap Tap when both keys are down
-          <select name="snapMode"><option value="last">Last pressed wins</option><option value="neutral">Neither (neutral)</option><option value="first">First pressed wins</option><option value="deeper">Deeper pressed wins (Rappy Snappy)</option></select></label>
-        <div class="field fw-dim" data-cap="idleDim">
-          <label>Dim lighting after idle <output data-for="dimMinutes"></output>
-            <input type="range" name="dimMinutes" min="0" max="60" step="1"></label>
-          <label>Dimmed brightness <output data-for="dimPercent"></output>
-            <input type="range" name="dimPercent" min="5" max="90" step="5"></label>
-          <p class="muted small">The lighting fades to this level first, then turns off at "Lighting off after idle". A dim time at or after the off time is skipped. Any key wakes it.</p>
-        </div>
-        <label>Lighting off after idle <output data-for="idleMinutes"></output>
-          <input type="range" name="idleMinutes" min="0" max="60" step="1">
-          <span class="help">0 = never.</span></label>
-        <div class="field" data-cap="releaseDebounce">
-          <label>Release debounce <output data-for="releaseDebounceMs"></output>
-            <input type="range" name="releaseDebounceMs" min="0" max="10" step="1"></label>
-          <p class="muted small">After you let go, a key stays down this long, so a key that flickers on release isn't sent twice. Presses are never delayed. Off for the fastest rapid trigger.</p>
-        </div>
-        <div class="field" data-cap="compatMode">
-          <label class="toggle"><input type="checkbox" name="compatMode"><span class="switch"></span> Compatibility mode (6-key)</label>
-          <p class="muted small">The keyboard reports itself as a plain 6-key boot keyboard, without n-key rollover, for a BIOS, a console or a KVM switch that doesn't see keys otherwise. Only 6 keys at once (plus modifiers) reach the PC.</p>
+        <div class="fw-groups">
+          <fieldset class="fw-group">
+            <legend>Indicators</legend>
+            <label class="toggle"><input type="checkbox" name="capsIndicator"><span class="switch"></span> Caps Lock lights the Caps key</label>
+            <label>Caps Lock colour <input type="color" name="capsColor"></label>
+            <label class="toggle"><input type="checkbox" name="layerIndicator"><span class="switch"></span> Show the active layer's keys</label>
+            <label class="toggle"><input type="checkbox" name="statusGuide"><span class="switch"></span> Fn status flashes</label>
+          </fieldset>
+          <fieldset class="fw-group">
+            <legend>Lighting and power</legend>
+            <div class="field">
+              <label class="toggle"><input type="checkbox" name="perf"><span class="switch"></span> Performance mode (lighting off)</label>
+              <p class="muted small">The keyboard stops drawing lighting effects and the LEDs stay off, so all its time goes to the keys. Game mode and calibration still light up.</p>
+            </div>
+            <div class="field fw-dim" data-cap="idleDim">
+              <label>Dim lighting after idle <output data-for="dimMinutes"></output>
+                <input type="range" name="dimMinutes" min="0" max="60" step="1"></label>
+              <label>Dimmed brightness <output data-for="dimPercent"></output>
+                <input type="range" name="dimPercent" min="5" max="90" step="5"></label>
+              <p class="muted small">The lighting fades to this level first, then turns off at "Lighting off after idle". A dim time at or after the off time is skipped. Any key wakes it.</p>
+            </div>
+            <label>Lighting off after idle <output data-for="idleMinutes"></output>
+              <input type="range" name="idleMinutes" min="0" max="60" step="1">
+              <span class="help">0 = never.</span></label>
+          </fieldset>
+          <fieldset class="fw-group">
+            <legend>Keys</legend>
+            <div class="field">
+              <label class="toggle"><input type="checkbox" name="fnHold"><span class="switch"></span> Fn layer pick only while held</label>
+              <p class="muted small">Fn + Home / Del / PgUp / PgDn picks Fn layer 1 / 2 / 3 / 4. Off: the pick stays until you pick another. On: it only applies while you hold that key.</p>
+            </div>
+            <label>Snap Tap when both keys are down
+              <select name="snapMode"><option value="last">Last pressed wins</option><option value="neutral">Neither (neutral)</option><option value="first">First pressed wins</option><option value="deeper">Deeper pressed wins (Rappy Snappy)</option></select></label>
+            <div class="field" data-cap="releaseDebounce">
+              <label>Release debounce <output data-for="releaseDebounceMs"></output>
+                <input type="range" name="releaseDebounceMs" min="0" max="10" step="1"></label>
+              <p class="muted small">After you let go, a key stays down this long, so a key that flickers on release isn't sent twice. Presses are never delayed. Off for the fastest rapid trigger.</p>
+            </div>
+            <div class="field" data-cap="compatMode">
+              <label class="toggle"><input type="checkbox" name="compatMode"><span class="switch"></span> Compatibility mode (6-key)</label>
+              <p class="muted small">The keyboard reports itself as a plain 6-key boot keyboard, without n-key rollover, for a BIOS, a console or a KVM switch that doesn't see keys otherwise. Only 6 keys at once (plus modifiers) reach the PC.</p>
+            </div>
+          </fieldset>
+          <fieldset class="fw-group">
+            <legend>Text keys</legend>
+            <label class="unicode-field">Special characters in text keys are typed for
+              <select name="unicode"><option value="windows">Windows</option><option value="linux">Linux</option><option value="mac">macOS</option></select>
+              <span class="help">How the keyboard enters characters a US keyboard doesn't have (é, °, ( ͡° ͜ʖ ͡°), emoji…). Windows needs a one-time setting, see the Text keys page.</span></label>
+            <div id="fw-text-typing"></div>
+          </fieldset>
+          <fieldset class="fw-group">
+            <legend>Hold bar and mode flash</legend>
+            <div class="field" data-cap="holdBar">
+              <label class="toggle"><input type="checkbox" name="holdBar"><span class="switch"></span> Hold progress bar</label>
+              <label>Hold bar colour <input type="color" name="holdBarColor"></label>
+              <label>Hold bar colour for Esc holds <input type="color" name="holdBarEscColor"></label>
+              <p class="muted small">While you hold a key for a key action "hold" rule, Home, Del, PgUp, PgDn and Right fill up over the hold time, then flash 3 times when it fires. Shown over any lighting, also with the lighting off. Esc holds (Fn + Esc to leave all modes, hold rules on Esc) use the Esc colour.</p>
+            </div>
+            <div class="field" data-cap="modeFlash" id="fw-mode-flash"></div>
+          </fieldset>
         </div>
         <p class="muted small" data-fw-missing hidden></p>
       </form>
@@ -569,6 +604,17 @@
         <p class="muted small" id="fw-reset-note" hidden></p>
       </section>
 
+      <section class="panel" id="ai-panel" data-views="settings">
+        <h2>AI assistant</h2>
+        <p class="muted small">A DeepSeek API key lets the Assistant page change the keyboard with the same tools as the MCP server.
+          The key stays on this PC (config/secrets.json) and goes only to DeepSeek; this page never gets it back.</p>
+        <form id="ai-key-form" data-nodirty autocomplete="off">
+          <label class="field">DeepSeek API key
+            <input type="password" name="key" autocomplete="off" spellcheck="false" maxlength="200" placeholder="sk-…"></label>
+          <div class="row-buttons"><button type="submit">Save</button><button type="button" id="ai-key-clear">Clear</button></div>
+          <p class="muted small" id="ai-key-status" role="status"></p>
+        </form>
+      </section>
       <section class="panel wide" id="quick-panel" data-views="quick"></section>
       <section class="panel wide" id="profiles-panel" data-views="profiles"></section>
       <section class="panel wide" id="library-panel" data-views="profiles"></section>
@@ -598,6 +644,7 @@
   <script src="glide-core.js"></script>
   <script src="sequence.js"></script>
   <script src="text-typing-option.js"></script>
+  <script src="mode-flash-option.js"></script>
   <script src="texts.js"></script>
   <script src="dks-editor.js"></script>
   <script src="adv-active.js"></script>
@@ -608,6 +655,7 @@
   <script src="mem-bar.js"></script>
   <script src="features-core.js"></script>
   <script src="features.js"></script>
+  <script src="assistant.js"></script>
   <script src="fw-builder.js"></script>
   <script src="switch-viz.js"></script>
   <script src="switch-viz-panels.js"></script>

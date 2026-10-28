@@ -213,3 +213,31 @@ test('restored maps: an existing mouse-keys block shows shareSpeed / keepMs, and
   field(without).SHARE = 'TRUE';            // Ivo ticks it
   assert.deepStrictEqual(B.compile(without, { modes: MODES }).batch().maps[0].rules[0].do, { mouseKeys: 'up', rampMs: 500, shareSpeed: true, keepMs: 150 });
 });
+
+test('flash block: "flash the hold bar N times in colour" compiles to { flash, times } (no mode), round trips, warns without modeFlash', () => {
+  const ws = (fields) => {
+    const hat = blk('kb_when_pressed', { KEY: 'P' }, { x: 20, y: 20 });
+    hat.next = { block: blk('kb_if', {}, { inputs: { COND: { block: blk('kb_held', { KEY: 'Fn' }) }, DO: { block: blk('kb_flash', fields) } } }) };
+    return { blocks: { languageVersion: 0, blocks: [hat] } };
+  };
+  const r = B.compile(ws({ TIMES: 5, COLOR: '#FF00FF' }), { modes: MODES, flash: true });
+  assert.deepStrictEqual(r.warnings, {});
+  assert.deepStrictEqual(r.batch(), { maps: [{ key: 'P', rules: [{ when: 'press', if: { held: ['Fn'] }, do: { flash: '#ff00ff', times: 5 } }] }] });
+  assert.deepStrictEqual(B.compile(ws({ TIMES: 1, COLOR: 'default' }), { modes: MODES }).batch().maps[0].rules[0].do, { flash: true, times: 1 }, 'default = green (true)');
+  assert.strictEqual(K.sentence(r.blocks[0], MODES), 'While Fn is held, press P: flash the hold bar 5 times in #ff00ff');
+  // the keyboard's own JSON (also with a mode byte that would read as "toggle") -> blocks -> the same rules
+  const maps = [{ key: 'P', rules: [{ when: 'hold', ms: 300, do: { flash: '#123456', times: 4 } }, { when: 'tap', ms: 200, do: { flash: true, times: 15 } }] }];
+  const json = B.decompile(maps, MODES);
+  const back = B.compile(json, { modes: MODES, flash: true });
+  assert.deepStrictEqual(back.warnings, {});
+  assert.deepStrictEqual(back.batch().maps, maps);
+  assert.deepStrictEqual(json.blocks.blocks[0].next.block.fields, { TIMES: 4, COLOR: '#123456' });
+  // what the keyboard can't do warns on the block
+  const warn = (fields, opts) => Object.values(B.compile(ws(fields), { modes: MODES, ...opts }).warnings).flat();
+  assert.ok(warn({ TIMES: 3, COLOR: 'default' }, { flash: false }).some((w) => /needs a newer open firmware.*modeFlash/.test(w)));
+  assert.deepStrictEqual(warn({ TIMES: 3, COLOR: 'default' }, {}), [], 'not known: not checked');
+  assert.ok(warn({ TIMES: 16, COLOR: 'default' }, { flash: true }).some((w) => /1 to 15 times/.test(w)));
+  assert.ok(warn({ TIMES: 2, COLOR: '#000000' }, { flash: true }).some((w) => /Black can't flash/.test(w)));
+  assert.deepStrictEqual(K.allowedModes('hold', { flash: true }), ['press']);
+  assert.strictEqual(K.ruleSlots(K.newBlock({ key: 'P', do: { flash: true } })), 1);
+});

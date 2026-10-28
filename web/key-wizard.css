@@ -80,3 +80,5 @@ body[data-view="wizard"][data-kw="code"] [data-kw-tab]:not([data-kw-tab~="code"]
 .kb-summary h3 { margin: 10px 0 4px; }
 .kb-summary ul { margin: 0 0 6px; padding-left: 20px; font-size: 13px; }
 @media (max-width: 700px) { .kb-mode { grid-template-columns: 1fr 1fr; } }
+.kw-holdbar { display: flex; align-items: center; justify-content: center; gap: .5em; margin-top: .5em; }
+.kw-holdbar input[type=color] { width: 2.2em; height: 1.6em; padding: 0; }

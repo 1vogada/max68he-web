@@ -17,7 +17,7 @@ const compile = (code, state = null) => C.compile(code, { state, run: K.runScrip
 const errs = async (code, state) => (await compile(code, state)).errors.map((e) => `${e.line}: ${e.message}`);
 // a keyboard with everything (engine 3); override what a test needs
 const FULL = ['keyActions', 'dksLevels', 'fnLayers', 'textKeys', 'gamepad', 'gamepadPlus', 'sequence', 'sequenceGlide', 'textTyping',
-  'compatMode', 'releaseDebounce', 'idleDim', 'optionsLayers', 'fxEffects'];
+  'compatMode', 'releaseDebounce', 'idleDim', 'optionsLayers', 'fxEffects', 'modeFlash'];
 const STATE = { model: 'max68he', open: true, features: FULL, engine: 3, entries: 16, hostApi: 3, openModes: [0x40, 0x42, 0x46],
   modes: [{ id: 1, name: '' }, { id: 2, name: '' }, { id: 3, name: '' }], profile: 0, unitMm: 0.005 };
 
@@ -180,6 +180,8 @@ test('validation: what the connected firmware lacks is an error, never a silent 
     [none, "kb.textTyping('block')", /textTyping needs a newer open firmware/],
     [none, "kb.key('W').dks({ keys: ['W'], levels: [{ depthMm: 1 }] })", /Multi-level DKS needs a newer open firmware/],
     [none, "kb.sequence('W tap')", /Play sequence needs a newer open firmware/],
+    [none, "kb.holdBar({ on: false })", /Hold progress bar needs a newer open firmware \(feature "holdBar"\)/],
+    [stock, "kb.holdBar({ on: false })", /Hold progress bar needs the open firmware/],
     [stock, "kb.firmwareOptions({ fnHold: true })", /Firmware options needs the open firmware/],
     [v1, "kb.mode('Mouse')", /modes need a newer open firmware \(key action engine 2\)/],
   ];
@@ -225,6 +227,79 @@ console.log(kb.keys.wasd.names.join(''), kb.layout[4].length, kb.firmware.has('d
   assert.deepStrictEqual(p.gamepad.bindings.map((b) => [b.key, b.target]), [['W', 'ly-'], ['S', 'ly+']]);
   assert.deepStrictEqual(p.macros[0].steps.map((s) => [s.usage, s.down, s.delayMs]), [[0xe1, true, 15], [4, true, 15], [4, false, 15], [0xe1, false, 30]]);
   assert.strictEqual(p.profile, 1);
+});
+
+test('compile: kb.holdBar({ on, color }) -> firmware options holdBar / holdBarColor', async () => {
+  const st = { ...STATE, features: [...FULL, 'holdBar'] };
+  const r = await compile("kb.holdBar({ on: false, color: 'cyan' });", st);
+  assert.deepStrictEqual(r.errors, []);
+  assert.deepStrictEqual(r.plan.fwOptions, { holdBar: false, holdBarColor: [0, 255, 255] });
+  assert.deepStrictEqual((await compile('kb.holdBar({ on: true });', st)).plan.fwOptions, { holdBar: true });
+  assert.deepStrictEqual((await compile("kb.holdBar({ escColor: 'orange' });", st)).plan.fwOptions, { holdBarEscColor: [255, 165, 0] });
+  assert.ok((await errs("kb.holdBar({ escColor: 'x' })", st)).some((e) => /escColor: .*is not a colour/.test(e)));
+  for (const [code, re] of [["kb.holdBar({ on: 1 })", /on is true or false/], ["kb.holdBar({ color: 'nope' })", /color: .*is not a colour/],
+    ["kb.holdBar({ size: 2 })", /unknown hold bar option "size"/], ['kb.holdBar()', /kb\.holdBar\(\{ on\?, color\?, escColor\? \}\)/]]) {
+    const got = await errs(code, st);
+    assert.ok(got.some((e) => re.test(e)), `${code} -> ${JSON.stringify(got)}`);
+  }
+});
+
+test('compile: kb.mode(name, { flash, leaveFlash }) -> firmware options modeFlash for that mode', async () => {
+  const st = { ...STATE, modes: [{ id: 1, name: 'Mouse' }, { id: 2, name: 'Tilde' }, { id: 3, name: '' }] };
+  const r = await compile("const t = kb.mode('Tilde', { flash: 'cyan', leaveFlash: false });\nkb.mode('Mouse', { flash: false, leaveFlash: [255, 128, 0] });", st);
+  assert.deepStrictEqual(r.errors, []);
+  assert.deepStrictEqual(r.plan.fwOptions, { modeFlash: [{ mode: 1, enter: false, leave: true, leaveColor: [255, 128, 0] },
+    { mode: 2, enter: true, enterColor: [0, 255, 255], leave: false }] });
+  // true = on in the default colour (green / dim white #404040); with a number; merged with kb.holdBar
+  const t = await compile("kb.mode('Nav', 3, { flash: true, leaveFlash: true }); kb.holdBar({ on: false });", { ...st, features: [...FULL, 'holdBar'] });
+  assert.deepStrictEqual(t.errors, []);
+  assert.deepStrictEqual(t.plan.fwOptions, { modeFlash: [{ mode: 3, enter: true, enterColor: [0, 255, 0], leave: true, leaveColor: [64, 64, 64] }], holdBar: false });
+  assert.deepStrictEqual(t.plan.keyActions.modes, [{ id: 3, name: 'Nav' }]);
+  // a mode named twice: its options merge; no options: nothing written
+  assert.deepStrictEqual((await compile("kb.mode('Tilde', { flash: false }); kb.mode('Tilde', { leaveFlash: 'red' });", st)).plan.fwOptions,
+    { modeFlash: [{ mode: 2, enter: false, leave: true, leaveColor: [255, 0, 0] }] });
+  assert.strictEqual((await compile("kb.mode('Tilde');", st)).plan.fwOptions, undefined);
+  for (const [code, re] of [["kb.mode('Tilde', { flash: 'black' })", /flash: black \(0, 0, 0\) can't flash.*use true for the default, false for no flash/],
+    ["kb.mode('Tilde', { leaveFlash: [0, 0, 0] })", /leaveFlash: black/], ["kb.mode('Tilde', { flash: 'nope' })", /flash is true, false or a colour: "nope" is not a colour/],
+    ["kb.mode('Tilde', { flash: 1 })", /flash is true, false or a colour/], ["kb.mode('Tilde', { blink: true })", /unknown mode option "blink" \(flash, leaveFlash\)/],
+    ["kb.mode('Tilde', {})", /kb\.mode\(name, \{ flash\?, leaveFlash\? \}\)/]]) {
+    const got = await errs(code, st);
+    assert.ok(got.some((e) => re.test(e)), `${code} -> ${JSON.stringify(got)}`);
+  }
+});
+
+test('compile: kb.flash(color, times) is a do-action: output 11, colour forms, times 1..15, black refused', async () => {
+  const r = await compile(`kb.key('Home').when('press').do(kb.flash([255, 0, 255], 5));
+kb.key('Del').when('hold', 300).if({ mode: kb.mode('Tilde') }).do(kb.flash());
+kb.key('PgUp').when('tap', 200).do(kb.send('A'), kb.flash('orange', 15));`, STATE);
+  assert.deepStrictEqual(r.errors, []);
+  assert.deepStrictEqual(r.plan.keyActions.maps.map((m) => [m.key, m.rules.map((x) => x.do)]), [
+    ['Home', [{ flash: [255, 0, 255], times: 5 }]], ['Del', [{ flash: true }]], ['PgUp', [{ key: 'A' }, { flash: [255, 165, 0], times: 15 }]]]);
+  const KA = require('../src/key-actions');
+  const home = KA.toRecord(KA.parseSpec({ ...r.plan.keyActions.maps[0], key: undefined, slot: 85 }), 85);
+  assert.deepStrictEqual(home.slice(8, 16), [0x05, 5, 0, 0, 0x0b, 0xff, 0x00, 0xff], 'the firmware doc example');
+  for (const [code, re] of [["kb.key('A').when('press').do(kb.flash('red', 0))", /A: do: times is a whole number within 1..15/],
+    ["kb.key('A').when('press').do(kb.flash('red', 16))", /times is a whole number within 1..15/],
+    ["kb.key('A').when('press').do(kb.flash('black', 2))", /kb\.flash: black \(0, 0, 0\) can't flash/],
+    ["kb.key('A').when('press').do(kb.flash('nope'))", /kb\.flash colour: "nope" is not a colour/],
+    ["kb.key('A').when('press').mode('tap').do(kb.flash('red'))", /a flash has no mode/]]) {
+    const got = await errs(code, STATE);
+    assert.ok(got.some((e) => re.test(e)), `${code} -> ${JSON.stringify(got)}`);
+  }
+});
+
+test('mode flash and kb.flash on firmware without caps modeFlash: errors, nothing planned', async () => {
+  const noFlash = { ...STATE, features: FULL.filter((f) => f !== 'modeFlash') };
+  const stock = { ...STATE, open: false, features: [], engine: 0, openModes: [], modes: null };
+  for (const [state, code, re] of [[noFlash, "kb.mode('Tilde', { flash: false })", /Mode flash needs a newer open firmware \(feature "modeFlash"\)/],
+    [stock, "kb.mode('Tilde', { flash: false })", /Mode flash needs the open firmware/],
+    [noFlash, "kb.key('Home').when('press').do(kb.flash('red', 3))", /kb\.flash needs a newer open firmware \(feature "modeFlash"\)/]]) {
+    const r = await compile(code, state);
+    assert.ok(!r.ok && r.errors.some((e) => re.test(e.message)), `${code} -> ${JSON.stringify(r.errors)}`);
+    assert.ok(!r.plan.fwOptions && !r.plan.keyActions?.maps.length, 'nothing planned');
+  }
+  // no keyboard: not checked
+  assert.deepStrictEqual((await compile("kb.mode('T', { flash: false }); kb.key('A').when('press').do(kb.flash());")).errors, []);
 });
 
 test('compile: colours in every form', async () => {
@@ -443,4 +518,34 @@ test('MCP: run_kb_code checks without a keyboard (errors as "line N:C: ..."); ge
   } finally {
     Keyboard.open = realOpen;
   }
+});
+
+test('diff / apply: mode flash writes only the changed fields of the changed modes; a second apply writes nothing', async () => {
+  const { k, calls } = stubKeyboard();
+  const fw = { capsIndicator: false, capsColor: [255, 255, 255], textTyping: 'keep',
+    modeFlash: [1, 2, 3].map((mode) => ({ mode, enter: true, enterColor: [0, 255, 0], leave: true, leaveColor: [64, 64, 64] })) };
+  k.getFirmwareOptions = async () => structuredClone(fw);
+  k.getModes = async () => [{ id: 1, name: 'Mouse' }, { id: 2, name: 'Tilde' }, { id: 3, name: '' }];
+  k.setFirmwareOptions = async (c) => { calls.push(['setFirmwareOptions', c]); fw.modeFlash = require('../src/protocol').mergeModeFlash(fw.modeFlash, c.modeFlash); };
+  const code = "kb.mode('Tilde', { flash: true, leaveFlash: 'red' }); kb.mode('Mouse', { flash: false });";
+  const c = await K.check(code, { keyboard: k });
+  assert.ok(c.ok, JSON.stringify(c.errors));
+  assert.deepStrictEqual(c.summary, ['Mode 1 (Mouse) flash: enter flash off (was on)', 'Mode 2 (Tilde) flash: leave colour #ff0000 (was #404040)']);
+  const a = await K.apply(k, code);
+  assert.ok(a.ok, JSON.stringify(a.errors));
+  assert.deepStrictEqual(calls.filter((x) => x[0] === 'setFirmwareOptions'), [['setFirmwareOptions', { modeFlash: [{ mode: 1, enter: false }, { mode: 2, leaveColor: [255, 0, 0] }] }]]);
+  assert.deepStrictEqual((await K.apply(k, code)).applied, ['Nothing to change: the keyboard already matches the script.']);
+});
+
+test('apply: kb.flash writes the FLASH record on firmware with caps modeFlash, and nothing without it', async () => {
+  const code = "kb.key('Home').when('press').do(kb.flash([255, 0, 255], 5));";
+  const yes = fakeKeyboard({ engine: 5, entries: 16, caps3: 0xc300, keys: MAX68HE_KEYS });
+  const r = await K.apply(yes.kb, code);
+  assert.ok(r.ok, JSON.stringify(r.errors));
+  assert.deepStrictEqual(yes.table.get(85).slice(8, 16), [5, 5, 0, 0, 11, 255, 0, 255]);
+  assert.deepStrictEqual((await K.apply(yes.kb, code)).applied, ['Nothing to change: the keyboard already matches the script.']);
+  const no = fakeKeyboard({ engine: 5, entries: 16, caps3: 0xc100, keys: MAX68HE_KEYS });
+  const n = await K.apply(no.kb, code);
+  assert.ok(!n.ok && n.errors.some((e) => /kb\.flash needs a newer open firmware/.test(e.message)));
+  assert.deepStrictEqual(no.sent.filter((p) => p[0] === 0xee && p[1] === 2), [], 'no record sent');
 });

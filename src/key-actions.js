@@ -4,7 +4,8 @@
 //
 // { key: 'W' | slot: 12, press?: mm (0.3), gap?: mm (0.1), alsoType?: false,
 //   rules: [{ when, at?, ms?, mode?, if?, do }] }   (up to 6 rules; see key-actions-core.js; `if`, mode
-//   outputs and mouse keys (engine 2; a mouse keys rule takes 2 rule slots, 3 with speedBy pressure / both) in key-modes.js)
+//   outputs and mouse keys (engine 2; a mouse keys rule takes 2 rule slots, 3 with speedBy pressure / both) in key-modes.js;
+//   the flash output { flash, times } (caps 'modeFlash') too: it has no mode, its mode byte is the count)
 // Wire units: depths in centi-mm (press 1..400, gap 1..50, at 10..400), hold / tap 10..10000 ms,
 // axis-depth from / to in 0.1 mm (0 <= from < to <= 4 mm), glide dx dy / 4 (+-508 px) over 10..2550 ms.
 const P = require('./protocol');
@@ -20,7 +21,7 @@ const MOUSE_NAMES = { l: 1, left: 1, r: 2, right: 2, m: 4, middle: 4 };
 const DO_FIELDS = { key: ['key'], gamepad: ['gamepad'], axis: ['axis', 'percent'], axisDepth: ['axis', 'from', 'to'],
   mouse: ['mouse'], move: ['move'], glide: ['glide', 'ms'], wheel: ['wheel'] };
 const DO_HELP = 'do is { key }, { gamepad }, { axis, percent }, { axis, from, to }, { mouse }, { move: [dx, dy] }, { glide: [dx, dy], ms }, { wheel }, '
-  + '{ mode, action }, { leaveAllModes: true } or { mouseKeys, start?, max?, rampMs?, curve?, power?, shareSpeed?, keepMs?, speedBy?, pressFrom?, pressTo? }';
+  + '{ mode, action }, { leaveAllModes: true }, { flash: true | [r, g, b] | "#rrggbb", times? } or { mouseKeys, start?, max?, rampMs?, curve?, power?, shareSpeed?, keepMs?, speedBy?, pressFrom?, pressTo? }';
 const kindOf = (d) => C.outputKind(d) ?? M.newKind(d);
 const int8 = (v) => (v > 127 ? v - 256 : v);
 
@@ -109,8 +110,13 @@ function rule(r, i, ctx, self) {
     if (r.at !== undefined) throw fail(where, `${r.when} takes ms, not at`);
     tval = int(r.ms, 10, 10000, 'ms', where);
   } else if (r.at !== undefined || r.ms !== undefined) throw fail(where, `${r.when} takes no at or ms`);
-  const { arg, depth, ...out } = output(r.do, where, ctx);
+  const { arg, depth, times, ...out } = output(r.do, where, ctx);
   const kind = kindOf(r.do), fresh = !C.outputKind(r.do);
+  const need = r.if === undefined ? null : M.parseIf(r.if, where, ctx, self);
+  if (kind === 'flash') {   // FLASH: the mode byte is the count; it fires once, there is no mode to pick
+    if (r.mode !== undefined) throw fail(where, `a flash has no mode: it fires once and flashes times (1..${P.KA.FLASH_MAX}) times`);
+    return [{ trigger: t + 1, mode: times, tval, ...out, ...(need && { need }) }];
+  }
   const mode = r.mode ?? (fresh ? M.newDefaultMode(r.when, kind, r.do) : C.defaultMode(r));
   if (!C.MODES.includes(mode)) throw fail(where, `mode is ${C.MODES.join(', ')}`);
   if (mode === 'while' && ['up', 'tap', 'release'].includes(r.when)) throw fail(where, `mode "while" works with down, hold and press, not ${r.when}`);
@@ -121,7 +127,6 @@ function rule(r, i, ctx, self) {
     const what = kind === 'mode' ? `a mode ${r.do.action}` : kind;
     throw fail(where, `${what} takes mode ${allowed.join(', ')}${kind === 'mode' ? ' (while only with action enter)' : ''}`);
   }
-  const need = r.if === undefined ? null : M.parseIf(r.if, where, ctx, self);
   return [{ trigger: t + 1, mode: C.MODES.indexOf(mode) + 1, tval, ...out, ...(need && { need }) }, ...(arg ? [arg] : []), ...(depth ? [depth] : [])];
 }
 
@@ -137,7 +142,8 @@ function parseSpec(spec, ctx) {
   if (spec.key !== undefined && (typeof spec.key !== 'string' || !spec.key.trim())) throw fail('', 'key is a key name like "W"');
   if (spec.alsoType !== undefined && typeof spec.alsoType !== 'boolean') throw fail('', 'alsoType is true or false');
   if (!Array.isArray(spec.rules)) throw fail('', 'rules is a list (empty removes the map)');
-  if (spec.rules.length > P.KA.MAX_RULES) throw fail('', `at most ${P.KA.MAX_RULES} rules per key, not ${spec.rules.length}`);
+  const parts = Boolean(ctx?.parts);   // engine 6: a key takes more records, any number of rules
+  if (!parts && spec.rules.length > P.KA.MAX_RULES) throw fail('', `at most ${P.KA.MAX_RULES} rules per key, not ${spec.rules.length}`);
   const head = {
     press: cmm(spec.press ?? C.DEFAULTS.pressMm, 1, 400, 'press', ''),
     gap: cmm(spec.gap ?? C.DEFAULTS.gapMm, 1, 50, 'gap', ''),
@@ -145,7 +151,7 @@ function parseSpec(spec, ctx) {
   };
   const self = ctx ? ctx.self : spec.key !== undefined ? M.LOOSE.slotOf(spec.key) : spec.slot;
   const rules = spec.rules.flatMap((r, i) => rule(r, i, ctx ?? M.LOOSE, self));
-  if (rules.length > P.KA.MAX_RULES) {
+  if (!parts && rules.length > P.KA.MAX_RULES) {
     throw fail('', `the rules take ${rules.length} of the key's ${P.KA.MAX_RULES} rule slots (a mouseKeys rule takes 2, 3 with speedBy pressure or both)`);
   }
   return { ...head, rules };
@@ -154,14 +160,43 @@ function parseSpec(spec, ctx) {
 // true when a parsed map needs engine 2 (conditions, modes, mouse keys)
 const usesModes = (wire) => wire.rules.some((x) => x.need || x.cond || x.output === M.OUT.MODE || x.output === M.OUT.MOUSE_KEYS || x.trigger === P.KA.ARG);
 
-// wire -> 56 bytes; condIndex(entry) -> 1..15 for rules with a condition (needs resolved slots / ids)
-function toRecord(wire, slot, condIndex) {
+// wire -> 56 bytes; condIndex(entry) -> the entry number for rules with a condition (needs resolved
+// slots / ids); part / bank: the record's (engine 6; its conditions are entries bank * 15 + 1..15)
+function toRecord(wire, slot, condIndex, { part = 0, bank = 0 } = {}) {
   const rules = wire.rules.map(({ need, ...x }) => {
     if (!need) return x;
     if (!condIndex) throw new Error('a rule with a condition needs the condition table');
     return { ...x, cond: condIndex(M.condEntry(need)) };
   });
-  return P.encodeKaRecord({ ...wire, rules, slot });
+  return P.encodeKaRecord({ ...wire, rules, slot, part, bank });
+}
+
+// wire rules -> parts of at most 6 rule slots (engine 6); a mouse keys rule stays with its ARG / DEPTH rules
+function splitParts(rules) {
+  const groups = [];
+  rules.forEach((x) => { if (x.trigger === P.KA.ARG && groups.length) groups[groups.length - 1].push(x); else groups.push([x]); });
+  const parts = [[]];
+  for (const g of groups) {
+    if (parts[parts.length - 1].length + g.length > P.KA.MAX_RULES) parts.push([]);
+    parts[parts.length - 1].push(...g);
+  }
+  return parts.filter((x) => x.length);
+}
+
+// wire -> one record per part; bankFor(entries) -> { bank, condIndex } for a part's conditions
+function toRecords(wire, slot, bankFor) {
+  return splitParts(wire.rules).map((rules, part) => {
+    const entries = rules.filter((x) => x.need).map((x) => M.condEntry(x.need));
+    const { bank = 0, condIndex } = bankFor ? bankFor(entries) : {};
+    return toRecord({ ...wire, rules }, slot, condIndex, { part, bank });
+  });
+}
+
+// a key's records (its parts, part 0 first) -> one decoded map (the rules of every part in order)
+function mergeParts(records) {
+  const d = records.map((r) => (Array.isArray(r) ? P.decodeKaRecord(r) : r)).sort((a, b) => (a.part ?? 0) - (b.part ?? 0));
+  const { part, bank, ...head } = d[0];
+  return { ...head, rules: d.flatMap((x) => x.rules) };
 }
 
 function doOf(x) {
@@ -193,8 +228,9 @@ function fromRecord(bytes, name, ctx = {}) {
     if (depth) tails.add(i + 2);
     const need = x.need ?? (x.cond ? M.needOf(ctx.conds?.[x.cond - 1]) : null);
     const cond = need ? M.ifJson(need, ctx) : x.cond ? { entry: x.cond } : null;
+    const flash = M.isFlashRule(x);   // its mode byte is the flash count (do.times), never a mode
     rules.push({ when, ...((when === 'down' || when === 'up') && { at: x.tval / 100 }), ...((when === 'hold' || when === 'tap') && { ms: x.tval }),
-      mode: C.MODES[x.mode - 1] ?? `mode ${x.mode}`, ...(cond && { if: cond }), do: M.newDo(x, arg, ctx, depth) ?? doOf(x) });
+      ...(!flash && { mode: C.MODES[x.mode - 1] ?? `mode ${x.mode}` }), ...(cond && { if: cond }), do: M.newDo(x, arg, ctx, depth) ?? doOf(x) });
   });
   const spec = { ...(name && { key: name }), slot: r.slot, press: (r.press || 30) / 100, gap: (r.gap || 10) / 100, alsoType: Boolean(r.flags & 1), rules };
   return { ...spec, summary: M.summary(spec) };
@@ -209,4 +245,4 @@ function preview(spec) {
   return { ...(spec.key !== undefined && { key: spec.key }), ...(spec.slot !== undefined && { slot: spec.slot }), ...out };
 }
 
-module.exports = { parseSpec, toRecord, fromRecord, preview, usesModes, fail };
+module.exports = { parseSpec, toRecord, toRecords, splitParts, mergeParts, fromRecord, preview, usesModes, usesFlash: M.usesFlash, fail };

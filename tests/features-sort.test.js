@@ -62,8 +62,14 @@ const KA = {
 
 test('use from the real key-actions answer: maps, modes, mouse keys, pressure speed', () => {
   assert.deepStrictEqual(C.useFromKeyActions(KA),
-    { keyActionMaps: 3, glideActions: 0, mouseActions: 2, pressureMouse: 1, modes: 2 });
-  assert.deepStrictEqual(C.useFromKeyActions({}), { keyActionMaps: 0, glideActions: 0, mouseActions: 0, pressureMouse: 0, modes: 0 });
+    { keyActionMaps: 3, glideActions: 0, mouseActions: 2, pressureMouse: 1, flashActions: 0, modes: 2 });
+  assert.deepStrictEqual(C.useFromKeyActions({}), { keyActionMaps: 0, glideActions: 0, mouseActions: 0, pressureMouse: 0, flashActions: 0, modes: 0 });
+  // a hold bar flash rule (caps modeFlash) counts for the modeflash switch
+  const fl = C.useFromKeyActions({ maps: [{ key: 'P', rules: [{ when: 'press', do: { flash: '#ff00ff', times: 5 } }] }] });
+  assert.strictEqual(fl.flashActions, 1);
+  assert.strictEqual(C.inUse({ id: 'modeflash', name: 'Mode flash' }, fl), true);
+  assert.strictEqual(C.inUse({ id: 'modeflash', name: 'Mode flash' }, C.useFromKeyActions(KA)), false);
+  assert.match(C.RULES.modeflash(fl), /^1 key with a hold bar flash/);
   const use = { ...C.useFromKeyActions(KA), lightingMode: 66 };
   const f = (id) => ({ id, name: id });
   for (const id of ['keyact', 'modes', 'mousekeys', 'mk_pressure', 'droplet']) assert.strictEqual(C.inUse(f(id), use), true, id);
